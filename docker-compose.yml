@@ -1,0 +1,163 @@
+# ═══════════════════════════════════════════════════════════════════════
+#  smartgrid-lambda-pipeline — infrastructure
+#  Section 1 brings up the core: Kafka, PostgreSQL, MinIO (+ Kafka UI).
+#  Spark, Airflow, Prometheus and Grafana are added in later sections.
+# ═══════════════════════════════════════════════════════════════════════
+name: smartgrid
+
+services:
+
+  # ── Ingestion bus ────────────────────────────────────────────────────
+  # Single-broker Kafka in KRaft mode (no ZooKeeper). Retention is set to
+  # 7 days deliberately: in this Lambda design Kafka is a *transport and
+  # short-term recovery* buffer, NOT the system of record. Long-horizon
+  # replay is the batch layer's job, served from immutable Parquet in
+  # MinIO. That is the cost argument against Kappa, encoded in config.
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: sg-kafka
+    ports:
+      - "9092:9092"          # host clients
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics are created explicitly by `kafka-init`, never implicitly.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  # ── One-shot: declare topics ─────────────────────────────────────────
+  # 6 partitions on the readings topic: parallelism for the speed layer,
+  # while keying by meter_id preserves per-meter ordering. The DLQ gets a
+  # longer retention than the source topic so poison messages survive
+  # long enough to be investigated.
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: sg-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    # NOTE: `command` must be a LIST whose single element is the whole script.
+    # A plain string here gets shell-split by Compose, and `sh -c` would then
+    # treat only the first word as the script and the rest as $0, $1, ...
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC_READINGS} --partitions 6 --replication-factor 1 \
+          --config retention.ms=604800000
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+          --topic ${KAFKA_TOPIC_DLQ} --partitions 3 --replication-factor 1 \
+          --config retention.ms=1209600000
+        echo "[kafka-init] topics now present:"
+        kafka-topics --bootstrap-server kafka:29092 --list
+
+  # ── Kafka UI (developer observability) ───────────────────────────────
+  # Port 8085 to leave 8080 free for Airflow in Section 6.
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: sg-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8085:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: smartgrid-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      DYNAMIC_CONFIG_ENABLED: "true"
+
+  # ── Serving store ────────────────────────────────────────────────────
+  # One instance, two databases: `smartgrid` (serving) and `airflow`
+  # (orchestrator metadata). Inside `smartgrid`, three schemas separate
+  # the Lambda layers — see infra/postgres/init/01_init.sql.
+  postgres:
+    image: postgres:16-alpine
+    container_name: sg-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_SERVING_DB}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_SERVING_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Object store: the immutable master dataset ───────────────────────
+  # S3-compatible, so every path and client call is identical to what a
+  # real deployment would use against S3.
+  #
+  # Pulled from quay.io, NOT Docker Hub: MinIO no longer publishes to the
+  # docker.io/minio/* namespace, so those references fail to resolve with
+  # a misleading "pull access denied" error. Tags are pinned to explicit
+  # RELEASE builds rather than :latest so the stack is reproducible by a
+  # marker months from now.
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: sg-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"          # S3 API
+      - "9001:9001"          # web console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── One-shot: create buckets ─────────────────────────────────────────
+  #   raw/  = landing zone for daily batch drops (tariff, weather)
+  #   lake/ = Parquet master dataset appended by the speed layer and
+  #           read by the batch layer. This is the system of record.
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: sg-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000
+    # See the note on kafka-init: the script must be a single list element.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc mb --ignore-existing local/${MINIO_BUCKET_RAW}
+        mc mb --ignore-existing local/${MINIO_BUCKET_LAKE}
+        echo "[minio-init] buckets now present:"
+        mc ls local
+
+volumes:
+  kafka-data:
+  pg-data:
+  minio-data:
