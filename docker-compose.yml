@@ -122,7 +122,7 @@ services:
   # and bucket creation now happening via MINIO_DEFAULT_BUCKETS instead
   # of a separate mc-based init container.
   minio:
-    image: bitnami/minio:latest
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
     container_name: sg-minio
     ports:
       - "9000:9000"          # S3 API
