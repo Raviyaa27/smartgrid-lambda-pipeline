@@ -112,50 +112,32 @@ services:
   # S3-compatible, so every path and client call is identical to what a
   # real deployment would use against S3.
   #
-  # Pulled from quay.io, NOT Docker Hub: MinIO no longer publishes to the
-  # docker.io/minio/* namespace, so those references fail to resolve with
-  # a misleading "pull access denied" error. Tags are pinned to explicit
-  # RELEASE builds rather than :latest so the stack is reproducible by a
-  # marker months from now.
+  # NOTE: originally pulled from quay.io/minio/*, pinned to explicit
+  # RELEASE builds for reproducibility. MinIO archived minio/minio on
+  # GitHub and pulled its images from public registries shortly after
+  # (see project report, "Assumptions & Simplifications"), so this now
+  # uses the actively-maintained bitnami/minio image instead. It ships
+  # the same `mc` binary and honours the same MINIO_ROOT_USER/PASSWORD
+  # env vars, so nothing downstream changes except the data mount path
+  # and bucket creation now happening via MINIO_DEFAULT_BUCKETS instead
+  # of a separate mc-based init container.
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: bitnami/minio:latest
     container_name: sg-minio
-    command: server /data --console-address ":9001"
     ports:
       - "9000:9000"          # S3 API
       - "9001:9001"          # web console
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_DEFAULT_BUCKETS: "${MINIO_BUCKET_RAW},${MINIO_BUCKET_LAKE}"
     volumes:
-      - minio-data:/data
+      - minio-data:/bitnami/minio/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 10
-
-  # ── One-shot: create buckets ─────────────────────────────────────────
-  #   raw/  = landing zone for daily batch drops (tariff, weather)
-  #   lake/ = Parquet master dataset appended by the speed layer and
-  #           read by the batch layer. This is the system of record.
-  minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
-    container_name: sg-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000
-    # See the note on kafka-init: the script must be a single list element.
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        mc mb --ignore-existing local/${MINIO_BUCKET_RAW}
-        mc mb --ignore-existing local/${MINIO_BUCKET_LAKE}
-        echo "[minio-init] buckets now present:"
-        mc ls local
 
 volumes:
   kafka-data:
