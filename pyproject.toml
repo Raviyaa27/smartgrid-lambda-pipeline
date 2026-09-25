@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smartgrid-lambda-pipeline"
+version = "0.1.0"
+description = "Lambda-architecture data platform for smart-grid energy monitoring and billing"
+requires-python = ">=3.12"
+
+# Runtime dependencies are deliberately NOT declared here. They live in
+# requirements.txt with explicit pins, which is what CI and the grader
+# install. pyproject exists to make `smartgrid` importable and to hold
+# tool configuration, not to duplicate the dependency set.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.black]
+line-length = 100
