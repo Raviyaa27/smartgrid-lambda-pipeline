@@ -10,7 +10,7 @@ __pycache__/
 htmlcov/
 
 # ── Secrets & local config ──────────────────────────────
-.env
+# .env
 *.local
 
 # ── Generated data / artifacts (never committed) ────────
