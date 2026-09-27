@@ -1,3 +1,6 @@
+# ── Stream processing ─────────────────────────────────
+pyspark~=3.5
+
 # ── Ingestion ───────────────────────────────────────────
 confluent-kafka~=2.6          # librdkafka-backed; the production-grade client
 
