@@ -111,53 +111,46 @@ services:
   # ── Object store: the immutable master dataset ───────────────────────
   # S3-compatible, so every path and client call is identical to what a
   # real deployment would use against S3.
+  #   raw/  = landing zone for daily batch drops (tariff, weather)
+  #   lake/ = Parquet master dataset appended by the speed layer and
+  #           read by the batch layer. This is the system of record.
   #
-  # Pulled from quay.io, NOT Docker Hub: MinIO no longer publishes to the
-  # docker.io/minio/* namespace, so those references fail to resolve with
-  # a misleading "pull access denied" error. Tags are pinned to explicit
-  # RELEASE builds rather than :latest so the stack is reproducible by a
-  # marker months from now.
+  # Image provenance. MinIO first withdrew its images from docker.io, then
+  # (late September 2026) from quay.io as well -- the previously pinned
+  # quay.io RELEASE tags now return "no such manifest". This uses Bitnami's
+  # build instead. Note that the `bitnamilegacy` namespace is Bitnami's
+  # FROZEN archive: pinned and reproducible, but it receives no security
+  # updates. Acceptable for a local, single-user demo; a real deployment
+  # would use a managed S3 service rather than self-hosting MinIO.
+  #
+  # Buckets are created by the image itself (MINIO_DEFAULT_BUCKETS), so
+  # there is no separate init container. Bitnami creates them a few seconds
+  # AFTER the server first answers health probes, so the healthcheck below
+  # asserts the buckets exist rather than only that the server is up --
+  # "healthy" means provisioned, not merely running.
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
     container_name: sg-minio
-    command: server /data --console-address ":9001"
     ports:
       - "9000:9000"          # S3 API
       - "9001:9001"          # web console
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_DEFAULT_BUCKETS: ${MINIO_BUCKET_RAW},${MINIO_BUCKET_LAKE}
     volumes:
-      - minio-data:/data
+      # Bitnami runs as uid 1001 and keeps data under /bitnami/minio/data.
+      # A volume written by the old root-run image is not writable by it,
+      # hence a new volume name rather than reusing `minio-data`.
+      - minio-bitnami-data:/bitnami/minio/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
+      test: ["CMD-SHELL", "mc ls local/${MINIO_BUCKET_RAW} >/dev/null && mc ls local/${MINIO_BUCKET_LAKE} >/dev/null"]
+      interval: 5s
       timeout: 5s
-      retries: 10
-
-  # ── One-shot: create buckets ─────────────────────────────────────────
-  #   raw/  = landing zone for daily batch drops (tariff, weather)
-  #   lake/ = Parquet master dataset appended by the speed layer and
-  #           read by the batch layer. This is the system of record.
-  minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
-    container_name: sg-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000
-    # See the note on kafka-init: the script must be a single list element.
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        mc mb --ignore-existing local/${MINIO_BUCKET_RAW}
-        mc mb --ignore-existing local/${MINIO_BUCKET_LAKE}
-        echo "[minio-init] buckets now present:"
-        mc ls local
+      retries: 20
+      start_period: 10s
 
 volumes:
   kafka-data:
   pg-data:
-  minio-data:
+  minio-bitnami-data:
