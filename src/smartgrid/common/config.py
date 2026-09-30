@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     sim_num_zones: int = 6
     sim_emit_interval_seconds: float = 2.0
     sim_seed: int = 20260101
+    sim_fault_profile: str = "realistic"
+
+    # -- Observability ---------------------------------------------------
+    producer_metrics_port: int = 9101
 
     # -- Runtime context -------------------------------------------------
     running_in_docker: bool = Field(default_factory=_in_docker)

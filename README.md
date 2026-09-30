@@ -93,6 +93,29 @@ See the foundation modules working end to end, with no infrastructure needed:
 python scripts/section2_demo.py
 ```
 
+### Run the streaming source
+
+Start the simulated smart meters. Every process shares one simulated clock,
+anchored in PostgreSQL; `clock-reset` restarts simulated time from
+`SIM_START_DATE`.
+
+```bash
+python -m smartgrid.common.clock_store reset
+python -m smartgrid.producers.meter_simulator
+```
+
+In a second terminal, measure what the pipeline's shared validator makes of
+the live stream, including every injected fault:
+
+```bash
+python scripts/inspect_stream.py --seconds 30
+```
+
+Useful simulator options: `--faults none|realistic|chaos`, and
+`--silence-zone ZONE-C --silence-after 60 --silence-for 90` to take a zone
+offline (the lever for demonstrating the no-data alert). Prometheus metrics
+are served on port 9101.
+
 ### Task runner
 
 | Task | Windows | Linux / macOS |
@@ -101,6 +124,11 @@ python scripts/section2_demo.py
 | Stop stack | `.\scripts\dev.ps1 down` | `make down` |
 | Wipe volumes | `.\scripts\dev.ps1 reset` | `make reset` |
 | Verify | `.\scripts\dev.ps1 verify` | `make verify` |
+| Run tests | `.\scripts\dev.ps1 test` | `make test` |
+| Show / reset simulated clock | `.\scripts\dev.ps1 clock` / `clock-reset` | `make clock` / `make clock-reset` |
+| Run meter simulator | `.\scripts\dev.ps1 produce` | `make produce` |
+| ...with 10x faults | `.\scripts\dev.ps1 chaos` | `make chaos` |
+| Measure fault detection | `.\scripts\dev.ps1 inspect` | `make inspect` |
 
 ### Consoles
 
@@ -132,9 +160,9 @@ tests/               unit and integration tests
 | Component | State |
 |---|---|
 | Infrastructure (Kafka, PostgreSQL, MinIO) | Complete |
-| Foundation package (`smartgrid.common`) | Complete — 46 unit tests |
+| Foundation package (`smartgrid.common`) | Complete |
 | Architecture decision records | Complete — 7 records |
-| Streaming producer | Not started |
+| Streaming producer | Complete — physical model, 8 fault types, 100% measured detection |
 | Daily batch source | Not started |
 | Speed layer | Not started |
 | Batch settlement layer | Not started |
@@ -148,4 +176,9 @@ tests/               unit and integration tests
   settlement period. A real utility accumulates month-to-date consumption and
   charges the marginal block.
 - Single Kafka broker with replication factor 1 — no fault tolerance.
+- MinIO runs from `bitnamilegacy/minio`, a pinned but frozen archive image
+  that receives no security updates. MinIO withdrew its own images from both
+  docker.io and quay.io. Acceptable for a local demo only.
+- Smart meters report fixed-interval readings. A meter that is offline
+  produces gaps; on reconnection it may upload the missed intervals late.
 - Airflow shares the serving PostgreSQL instance for its metadata database.

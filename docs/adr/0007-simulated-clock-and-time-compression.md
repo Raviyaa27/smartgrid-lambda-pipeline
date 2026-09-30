@@ -35,7 +35,8 @@ Starting simulated date is `2026-01-01`, configured as `SIM_DAY_SECONDS` and
 Real wall-clock time appears in exactly two places, both of which are about
 the machine rather than the domain:
 
-- `ingest_time`, stamped by the producer, used to measure producer lag;
+- `ingest_time`, stamped by the producer, used to measure producer lag
+  *(corrected — see Amendment 1: `ingest_time` is simulated time)*;
 - log record timestamps.
 
 Everything domain-facing — `event_time`, the `dt=` partition key, the
@@ -148,3 +149,34 @@ point of the decision, not an implementation detail of it.
 - The system is ever deployed against real meters, at which point compression
   is removed entirely and `SimulatedClock` collapses to a pass-through over
   the wall clock.
+
+## Amendments
+
+### Amendment 1 — 2026-09-30: `ingest_time` is simulated time
+
+The original text above lists `ingest_time` as wall-clock time "used to
+measure producer lag". That is wrong. Producer lag is
+`ingest_time - event_time`, and `event_time` is simulated; subtracting a
+simulated timestamp from a real one produces a number with no meaning.
+
+**Corrected:** `ingest_time` is stamped in simulated time, at the moment the
+reading is actually handed to Kafka. A reading held back as late is stamped
+when it is finally released, so the lag records how late it really was.
+Real machine time still exists where it belongs -- in the Kafka message
+timestamp, set by the client, and in log timestamps -- and is used for
+measuring machine latency, never domain lag.
+
+### Amendment 2 — 2026-09-30: one clock anchor, shared by every process
+
+The decision says every component derives simulated time from
+`SimulatedClock`. It did not say where the clock's anchor comes from, and
+the first implementation took each process's own start time. Two processes
+started 30 real seconds apart would then run 2.4 simulated hours apart and
+disagree about the date -- silently breaking the join between the streaming
+and daily-batch sources at every day boundary.
+
+**Resolved:** the anchor is stored once, in `ops.sim_clock` (a single-row
+table), by `src/smartgrid/common/clock_store.py`. The first component to
+start creates it and every other component reads it. `clock_store reset`
+restarts the simulation. The decision itself is unchanged; this closes the
+gap in how it is implemented.

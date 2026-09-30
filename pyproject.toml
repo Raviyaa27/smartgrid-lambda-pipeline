@@ -20,6 +20,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+markers = [
+    "integration: needs the docker compose stack; skipped automatically when it is down",
+]
 
 [tool.ruff]
 line-length = 100
