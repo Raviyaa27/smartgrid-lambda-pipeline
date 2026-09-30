@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     sim_seed: int = 20260101
     sim_fault_profile: str = "realistic"
 
-    # -- Spark (speed layer; batch layer in Section 7) --------------------
+    # -- Spark (speed and batch layers) ------------------------------------
     spark_master: str = "local[4]"
     spark_driver_memory: str = "1g"
     spark_checkpoint_root: str = "/checkpoints"      # inside the Spark container
@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     speed_watermark_minutes: int = 30
     speed_trigger_seconds: int = 5
     speed_max_offsets_per_trigger: int = 5000
+
+    # -- Serving API -----------------------------------------------------
+    api_port: int = 8000
+    api_max_range_days: int = 31  # longest date range one request may ask for
 
     # -- Observability ---------------------------------------------------
     producer_metrics_port: int = 9101

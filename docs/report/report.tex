@@ -18,6 +18,8 @@
 \usepackage{lmodern}
 \usepackage[a4paper,margin=2.2cm,top=2.3cm,bottom=2.3cm]{geometry}
 \usepackage{microtype}
+% Keep "--" as two hyphens in code: command-line flags must survive copying.
+\DisableLigatures[-]{encoding=T1,family=tt*}
 \usepackage{graphicx}
 \usepackage{booktabs,tabularx,array,multirow,makecell}
 \usepackage[table]{xcolor}
@@ -298,7 +300,7 @@ structurally, not by discipline:
 \node[font=\tiny, align=center, text width=2.3cm] at ($(pg.center)+(0,0)$) {\textbf{ops.*}\\progress, quarantine,\\gate results, runs,\\reconciliation};
 \node[font=\tiny, align=center, text width=2.3cm] at ($(pg.center)+(0,-1.6)$) {\textbf{\color{batchc}batch.*}\\settled bills and zones;\\\code{current_*} views};
 % -- serving (right column)
-\node[srv, wip] (api) at (13.1,2.15) {\textbf{Serving API}\\merge rule: past days\\from batch, today\\from speed};
+\node[srv] (api) at (13.1,2.15) {\textbf{Serving API}\\FastAPI, merge rule:\\settled days from batch,\\today from speed};
 \node[srv, wip] (dash) at (13.1,4.3) {\textbf{Dashboards}\\Streamlit: business\\Grafana: operations};
 \node[srv] (report) at (13.1,0) {\textbf{Daily report}\\HTML per settlement\\\code{lake/reports/}};
 % -- flows
@@ -318,7 +320,7 @@ structurally, not by discipline:
 \node[draw=ink!50, fill=yellow!7, rounded corners=2pt, text width=15.6cm, minimum height=0.72cm,
       align=center, font=\tiny] (obs) at (6.55,-1.6)
   {\textbf{Observability, every stage:} structured JSON logs with correlation ids \,$\cdot$\,
-   Prometheus metrics (:9101 producer, :9102 batch source, :9103 speed layer) \,$\cdot$\,
+   Prometheus metrics (:9101 producer, :9102 batch source, :9103 speed layer, :8000 API) \,$\cdot$\,
    \code{ops.*} run tables \,$\cdot$\, dead-letter topic \,$\cdot$\, Airflow run history
    \,$\cdot$\, Prometheus server, Grafana and alert rules (in progress)};
 \end{tikzpicture}
@@ -543,10 +545,67 @@ mismatch without retrying.
 \subsection{Serving layer}
 \label{sec:serving}
 
-\pending{Section 8. Describe the implemented API: endpoints (live zone load and
-renewable mix; zone history; household bills; latest daily report; health), how each
-applies the merge rule of \cref{sec:decision}, the \textsc{provisional}/\textsc{settled}
-labels on every figure, and a sample response. Keep to about half a page.}
+Consumers never query the stores directly. A FastAPI service applies the merge rule of
+\cref{sec:decision} in one module (\code{serving/merge.py}), so no consumer can bypass
+it, and every figure it returns carries its \code{status} (\textsc{settled} or
+\textsc{provisional}) and \code{layer}. Building it exposed a case the rule had left
+out. A day that has ended is not settled at once: the 45-minute grace comes first, then
+the settlement itself. Serving nothing in that gap would blank yesterday every morning.
+Such a day is therefore served from the speed layer, labelled \emph{awaiting
+settlement}.
+
+\begin{table}[H]
+\centering\small
+\caption{Serving API endpoints: \code{GET} requests under \code{/api/v1}. Interactive documentation at \code{/docs}.}
+\label{tab:api}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{6.7cm}>{\raggedright\arraybackslash}X@{}}
+\toprule
+\textbf{Endpoint} & \textbf{Answers} \\
+\midrule
+\code{/zones/live} & Current load and renewable mix per zone, with each figure's age \\
+\code{/zones/daily?date=D} & A day's totals per zone; the speed-vs-batch gap once settled \\
+\code{/zones/{zone}/windows?from=D1&to=D2} & 15-minute windows across days, each labelled by source \\
+\code{/households/{id}/bills?from=D1&to=D2} & Settled bills, and why any other day has none \\
+\code{/households/{id}/bills/{D}/history} & The original bill and every restatement of it \\
+\code{/bills?date=D}, \code{/settlements}, \code{/reports/...} & A day's bills by tier; run history; the daily report \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+A response from the live run, at simulated 2026-01-02 17:15, shows the rule at work:
+
+\begin{footnotesize}
+\begin{verbatim}
+GET /api/v1/zones/ZONE-C/windows?from=2026-01-01&to=2026-01-02
+"days": [
+  {"date": "2026-01-01", "status": "SETTLED", "layer": "batch", "settlement_run_id": 38},
+  {"date": "2026-01-02", "status": "PROVISIONAL", "layer": "speed",
+   "reason": "today: a day is settled only after it ends"} ]
+\end{verbatim}
+\end{footnotesize}
+The response then lists 91 settled windows for day~1 and 67 provisional ones for today.
+
+\begin{itemize}
+  \item \textbf{Live means the latest \emph{complete} window.} The newest window is
+  still filling, and its load undercounts until every meter has reported. The API
+  serves each zone's latest window that the stream has passed, states its age in both
+  clocks, and flags it \code{stale} beyond the 60\,s target. In the live run the view was
+  45.8 simulated minutes old (9.5\,s real): not stale.
+  \item \textbf{No provisional bill, and no silent gaps.} A day without a settled bill is
+  listed with its reason (``day in progress'', ``awaiting settlement''), and
+  \code{/bills} returns 404 until settlement. Bill history shows restatements. For
+  example, one household's day-1 bill was 792.77\,LKR under drop v1 and 871.06\,LKR
+  after the restatement, with the regulator's reason attached.
+  \item \textbf{Money is exact}: amounts are decimal strings (\code{"871.06"}), never floats.
+  \item \textbf{Observed switching live.} Day~1 changed from \textsc{provisional} to
+  \textsc{settled} (run~38), and its bills from 404 to 200, as soon as settlement
+  committed. Nothing was restarted and no cache was cleared, because the API reads the
+  \code{batch.current_*} views on every request.
+\end{itemize}
+
+It is tested at two levels. 32 unit tests cover the merge rule and the HTTP contract
+against an in-memory store. 6 integration tests run every SQL query against the real
+schema.
 
 \subsection{Code quality and testing}
 \label{sec:quality}
@@ -554,7 +613,7 @@ labels on every figure, and a sample response. Keep to about half a page.}
 The code is one Python package (\code{smartgrid}) with modules for \code{common}
 (clock, schemas, shared validation, billing, storage), \code{producers},
 \code{streaming} and \code{batch}. The DAG files only wire together functions that are
-tested without Airflow. The suite has \textbf{305 unit and integration tests}, and
+tested without Airflow. The suite has \textbf{343 unit and integration tests}, and
 \textbf{8 Spark tests} that run inside the Spark image. They include the validator
 parity fuzz test, energy-model regressions, integration tests against MinIO under a
 throw-away prefix, and billing arithmetic checked to the cent. Eight architecture
@@ -587,6 +646,7 @@ Speed layer (:9103) & Records by outcome, late rows dropped, input and processin
 Run bookkeeping & \code{ops.ingest_batches}, \code{quarantine_counts}, \code{stream_progress}, \code{quality_gate_results}, \code{settlement_runs}, \code{reconciliation}. & A durable, queryable history; the batch layer's audit trail. \\
 Dead-letter topic & Every rejected message with reason and source partition and offset; 14-day retention (longer than the source's 7 days). & Evidence survives until someone investigates. \\
 Orchestration & Airflow run history; the settle task streams Spark's output and per-step timings into its log. & A slow or failed settlement is diagnosed from its log. \\
+Serving API (:8000) & Requests and latency per route \emph{template} (bounded label cardinality); a JSON log line per request with a request id echoed in \code{X-Request-ID}; \code{/health} reports speed-layer lag against the 60\,s target. & What consumers saw, and whether it was fresh. \\
 Health checks & Docker health checks on Kafka, PostgreSQL and MinIO (bucket existence); dependents start only when healthy. & The stack starts in a known state. \\
 \bottomrule
 \end{tabularx}

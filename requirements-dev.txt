@@ -1,5 +1,6 @@
 -r requirements.txt
 pytest~=8.3
 pytest-cov~=6.0
+httpx2~=2.13                  # FastAPI's TestClient (Starlette 1.7 deprecates httpx)
 ruff~=0.7
 black~=24.10

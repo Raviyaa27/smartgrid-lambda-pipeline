@@ -23,6 +23,7 @@ import time
 from datetime import UTC, date, datetime
 
 import psycopg
+from psycopg.rows import tuple_row
 
 from smartgrid.common.clock import SimulatedClock
 from smartgrid.common.config import Settings, get_settings
@@ -82,6 +83,23 @@ def shared_clock(settings: Settings | None = None) -> SimulatedClock:
             },
         )
     return _to_clock(real_epoch, sim_start, day_seconds)
+
+
+def read_clock(conn: psycopg.Connection) -> SimulatedClock | None:
+    """
+    The shared clock if a simulation exists, WITHOUT creating one. For
+    read-only consumers such as the serving API: starting a simulation is
+    not theirs to do, and `shared_clock` would start one as a side effect.
+    """
+    try:
+        # Its own cursor and row shape, whatever row factory the caller's
+        # connection uses.
+        with conn.cursor(row_factory=tuple_row) as cursor:
+            row = cursor.execute(_SELECT).fetchone()
+    except psycopg.errors.UndefinedTable:
+        conn.rollback()
+        return None
+    return _to_clock(*row) if row else None
 
 
 def reset_clock(

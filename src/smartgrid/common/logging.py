@@ -40,7 +40,8 @@ _correlation_id: ContextVar[str | None] = ContextVar("correlation_id", default=N
 # Derived at import time so it stays correct across Python versions.
 _RESERVED: frozenset[str] = frozenset(
     logging.LogRecord("", 0, "", 0, "", (), None).__dict__
-) | {"asctime", "message", "taskName"}
+) | {"asctime", "message", "taskName", "color_message"}
+# (color_message: uvicorn's ANSI-coloured duplicate of the message.)
 
 
 def new_correlation_id() -> str:

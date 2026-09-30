@@ -1,0 +1,11 @@
+# Python dependencies of the serving API image -- deliberately small: the API
+# reads PostgreSQL and MinIO and never needs Spark, pandas or Kafka.
+fastapi~=0.141
+uvicorn~=0.53
+psycopg[binary]~=3.2
+psycopg-pool~=3.2
+pydantic~=2.9
+pydantic-settings~=2.6
+python-dotenv~=1.0
+prometheus-client~=0.21
+boto3~=1.35

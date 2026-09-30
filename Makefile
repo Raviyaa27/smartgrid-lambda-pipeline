@@ -1,7 +1,7 @@
-.PHONY: help up down reset logs ps verify test clock clock-reset produce chaos inspect drop drops speed speed-logs spark-test build settlement airflow-logs sim-reset
+.PHONY: help up down reset logs ps verify test clock clock-reset produce chaos inspect drop drops speed speed-logs spark-test build settlement airflow-logs api-logs sim-reset
 .DEFAULT_GOAL := help
 
-help:        ; @echo "targets: up down reset logs ps verify | test | clock clock-reset produce chaos inspect drop drops speed speed-logs spark-test build settlement airflow-logs sim-reset"
+help:        ; @echo "targets: up down reset logs ps verify | test | clock clock-reset produce chaos inspect drop drops speed speed-logs spark-test build settlement airflow-logs api-logs sim-reset"
 
 # -- Infrastructure --------------------------------------------------------
 up:          ; docker compose up -d --remove-orphans && docker compose ps
@@ -25,7 +25,8 @@ drops:       ; python scripts/inspect_drops.py
 speed:       ; python scripts/inspect_speed_layer.py
 speed-logs:  ; docker compose logs -f --tail=100 speed-layer
 spark-test:  ; docker compose run --rm --no-deps speed-layer python -m pytest tests/spark -p no:cacheprovider
-build:       ; docker compose build speed-layer airflow
+build:       ; docker compose build speed-layer airflow api
 settlement:  ; python scripts/inspect_settlement.py
 airflow-logs: ; docker compose logs -f --tail=100 airflow
+api-logs:    ; docker compose logs -f --tail=100 api
 sim-reset:   ; docker compose stop speed-layer airflow && python -m smartgrid.common.simulation reset --yes && docker compose start speed-layer airflow

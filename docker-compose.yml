@@ -1,7 +1,8 @@
 # ═══════════════════════════════════════════════════════════════════════
 #  smartgrid-lambda-pipeline — infrastructure
-#  Kafka, PostgreSQL and MinIO (+ Kafka UI); the Spark speed layer; and
-#  Airflow running the Spark batch layer. Prometheus and Grafana to come.
+#  Kafka, PostgreSQL and MinIO (+ Kafka UI); the Spark speed layer;
+#  Airflow running the Spark batch layer; and the serving API.
+#  Prometheus and Grafana to come.
 # ═══════════════════════════════════════════════════════════════════════
 name: smartgrid
 
@@ -225,6 +226,34 @@ services:
       - airflow-logs:/opt/airflow/logs
     ports:
       - "8080:8080"          # Airflow UI and REST API
+    restart: unless-stopped
+
+  # ── Serving layer: the merge rule behind one API (ADR-0001) ─────────
+  # Reads speed.*, batch.* and ops.* and the published reports; writes
+  # nothing. Healthy while it can reach PostgreSQL: a stale speed layer
+  # makes /health report "degraded", not the API unhealthy.
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    image: smartgrid-api:1.0
+    container_name: sg-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./:/app:ro
+    ports:
+      - "8000:8000"          # API; interactive docs at /docs, Prometheus at /metrics
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
 volumes:

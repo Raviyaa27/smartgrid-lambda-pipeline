@@ -4,6 +4,7 @@ confluent-kafka~=2.6          # librdkafka-backed; the production-grade client
 # ── Storage clients ─────────────────────────────────────
 boto3~=1.35                   # S3 API against MinIO
 psycopg[binary]~=3.2          # PostgreSQL serving store
+psycopg-pool~=3.2             # connection pool for the serving API
 pyarrow~=17.0                 # Parquet reads outside Spark (tests, dashboard)
 
 # ── Serving ─────────────────────────────────────────────

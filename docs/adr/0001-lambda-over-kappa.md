@@ -223,3 +223,43 @@ contribution dropping below a floor in a zone — is worthless at T+1.
 - **The shared-module mitigation fails in practice.** If the two layers
   diverge despite it, the dual-path cost has been underestimated and the
   trade-off must be re-argued.
+
+## Amendments
+
+### Amendment 1 — 2026-10-01: the merge rule's third case, and what "live" means
+
+Implementing the serving API (`src/smartgrid/serving/`) showed that the
+merge rule above covers two cases and leaves out a third. A day that has
+ended is not settled at once: settlement waits 45 simulated minutes for
+the watermark, then takes about 90 real seconds. In that gap `d < today`
+is true, but there is no batch view to serve. Serving nothing would blank
+yesterday on the dashboard every morning.
+
+**Decided:** the rule has three cases, applied in `serving/merge.py` and
+nowhere else.
+
+```
+zone_metrics(zone, d) =
+    speed.zone_metrics    when d == today                      -- PROVISIONAL
+    batch.zone_settled    when d is settled                    -- SETTLED
+    speed.zone_metrics    when d < today and d is not settled  -- PROVISIONAL, "awaiting settlement"
+```
+
+The bill rule is unchanged: a bill exists only for a settled day. The API
+lists each unbilled day with its reason, rather than leaving it absent.
+
+Three details that the original text left open:
+
+- **"Settled" means the latest successful run.** Settlement runs are
+  append-only (ADR-0005, Amendment 2). The API serves `batch.current_*`,
+  so a restated day switches to its new figures once the restatement
+  commits. The previous bills stay available from the bill-history
+  endpoint.
+- **"Live" means the latest complete window.** The newest 15-minute window
+  is still filling, and its load undercounts until every meter has
+  reported. The live view serves each zone's latest window that the stream
+  has passed, and states its age in both clocks. It is flagged `stale` when
+  that age exceeds the 60-second freshness target.
+- **Money is served as decimal strings.** A bill exact to LKR 0.01 stops
+  being exact the moment it passes through a float, so the API never emits
+  one.

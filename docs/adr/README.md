@@ -11,7 +11,7 @@ architecture drove the build rather than being reverse-engineered from it.
 
 | ADR | Decision | Status |
 |-----|----------|--------|
-| [0001](0001-lambda-over-kappa.md) | Lambda architecture, not Kappa | Accepted |
+| [0001](0001-lambda-over-kappa.md) | Lambda architecture, not Kappa | Accepted, amended |
 | [0002](0002-spark-structured-streaming-over-storm.md) | Spark Structured Streaming for stream processing | Accepted, amended |
 | [0003](0003-kafka-topic-and-retention-design.md) | Kafka topic, partitioning and retention design | Accepted |
 | [0004](0004-shared-transformation-module.md) | One shared transformation module for both layers | Accepted |

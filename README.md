@@ -218,6 +218,40 @@ python -m smartgrid.producers.daily_batch_source revise --date 2026-01-01 \
 python scripts/settle.py --date 2026-01-01 --restate --reason "Regulator backdated revision"
 ```
 
+### The serving API
+
+One API in front of both layers, at http://localhost:8000. Interactive docs
+are at http://localhost:8000/docs. It applies the merge rule (ADR-0001), and
+every figure it returns carries `status` (`SETTLED` or `PROVISIONAL`) and
+`layer` (`batch` or `speed`):
+
+| Request | Served from |
+|---|---|
+| Today's zone figures | speed layer, `PROVISIONAL` |
+| A settled day's zone figures | batch layer, `SETTLED`; the speed figures for that day are ignored |
+| A day that has ended but is not settled yet | speed layer, `PROVISIONAL`, reason "awaiting settlement" |
+| Bills | batch layer only; there is no provisional bill |
+
+| Endpoint | Answers |
+|---|---|
+| `GET /api/v1/zones/live` | Current grid load and renewable mix per zone, with each figure's age |
+| `GET /api/v1/zones/daily?date=D` | One day's totals per zone, with the speed-vs-batch gap once settled |
+| `GET /api/v1/zones/{zone}/windows?from=D1&to=D2` | 15-minute windows across days, each labelled by source |
+| `GET /api/v1/households/{id}/bills?from=D1&to=D2` | Settled bills, and why any other day has none |
+| `GET /api/v1/households/{id}/bills/{D}/history` | Every settlement of that bill: original and restatements |
+| `GET /api/v1/bills?date=D` | All of a day's bills, with totals by tier (404 until settled) |
+| `GET /api/v1/settlements` | Settlement runs: status, trigger, restatement reason, totals |
+| `GET /api/v1/reports/latest`, `/reports/{D}/html` | The daily report |
+| `GET /health`, `GET /metrics` | Liveness and speed-layer freshness; Prometheus metrics |
+
+Money is returned as decimal strings (`"871.06"`), never floats. Dates are
+simulated dates, and "today" is the shared simulated clock's date.
+
+```bash
+curl -s localhost:8000/api/v1/zones/live
+curl -s "localhost:8000/api/v1/households/HH-00042/bills?from=2026-01-01&to=2026-01-03"
+```
+
 ### Task runner
 
 | Task | Windows | Linux / macOS |
@@ -239,6 +273,7 @@ python scripts/settle.py --date 2026-01-01 --restate --reason "Regulator backdat
 | Settlement runs, bills, speed vs batch | `.\scripts\dev.ps1 settlement` | `make settlement` |
 | Follow Airflow logs | `.\scripts\dev.ps1 airflow-logs` | `make airflow-logs` |
 | Settle / restate a day | `python scripts/settle.py --date D [--restate --reason R]` | same |
+| Follow API logs | `.\scripts\dev.ps1 api-logs` | `make api-logs` |
 | New simulation (everything) | `.\scripts\dev.ps1 sim-reset` | `make sim-reset` |
 
 ### Consoles
@@ -249,6 +284,7 @@ python scripts/settle.py --date 2026-01-01 --restate --reason "Regulator backdat
 | MinIO Console | http://localhost:9001 | `minioadmin` / `minioadmin123` |
 | Spark UI (speed layer) | http://localhost:4040 | — |
 | Airflow | http://localhost:8080 | — (no login; local demo only) |
+| Serving API docs | http://localhost:8000/docs | — |
 
 ## Repository layout
 
@@ -279,7 +315,8 @@ tests/               unit and integration tests
 | Daily batch source | Complete — versioned drops, tariff as data, 8 fault types, quality gate at 100% |
 | Speed layer | Complete — Spark 3.5 in Docker; reconciled to the message across a restart |
 | Batch settlement layer | Complete — Airflow 3.1 + Spark; quality gate, bills, reconciliation, daily report, restatement |
-| Serving API and dashboards | Not started |
+| Serving API | Complete — FastAPI; merge rule, provisional/settled labels, bill history, metrics |
+| Dashboards | Not started |
 | Observability (Prometheus, Grafana, alerts) | Not started |
 
 ## Assumptions and simplifications
