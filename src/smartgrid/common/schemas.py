@@ -48,7 +48,7 @@ METER_READING_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec("event_id", "string", description="Unique per emission; the dedupe key"),
     FieldSpec("meter_id", "string", description="Physical meter"),
     FieldSpec("household_id", "string", description="Billable connection"),
-    FieldSpec("grid_zone", "string", description="Kafka partition key"),
+    FieldSpec("grid_zone", "string", description="Aggregation key (Kafka is keyed by meter)"),
     FieldSpec(
         "power_consumption_kwh", "double", min_value=0.0, max_value=50.0,
         description="Energy drawn during the interval",
