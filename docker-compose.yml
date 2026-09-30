@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════
 #  smartgrid-lambda-pipeline — infrastructure
-#  Section 1 brings up the core: Kafka, PostgreSQL, MinIO (+ Kafka UI).
-#  Spark, Airflow, Prometheus and Grafana are added in later sections.
+#  Kafka, PostgreSQL and MinIO (+ Kafka UI); the Spark speed layer; and
+#  Airflow running the Spark batch layer. Prometheus and Grafana to come.
 # ═══════════════════════════════════════════════════════════════════════
 name: smartgrid
 
@@ -35,6 +35,9 @@ services:
       # Topics are created explicitly by `kafka-init`, never implicitly.
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_RETENTION_HOURS: 168
+      # Default heap is 1 GB; this workload needs far less, and memory is the
+      # constraint on a laptop running Kafka, Spark and Airflow together.
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
@@ -72,7 +75,7 @@ services:
         kafka-topics --bootstrap-server kafka:29092 --list
 
   # ── Kafka UI (developer observability) ───────────────────────────────
-  # Port 8085 to leave 8080 free for Airflow in Section 6.
+  # Port 8085 to leave 8080 free for Airflow.
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
     container_name: sg-kafka-ui
@@ -85,6 +88,7 @@ services:
       KAFKA_CLUSTERS_0_NAME: smartgrid-local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       DYNAMIC_CONFIG_ENABLED: "true"
+      JAVA_OPTS: "-Xms64m -Xmx256m"
 
   # ── Serving store ────────────────────────────────────────────────────
   # One instance, two databases: `smartgrid` (serving) and `airflow`
@@ -181,8 +185,51 @@ services:
     # A streaming job is meant to run forever: if it dies, bring it back.
     restart: unless-stopped
 
+  # ── Batch layer orchestration: Airflow 3.1 (ADR-0006) ───────────────
+  # The official image plus the same Spark runtime as the speed layer
+  # (docker/airflow.Dockerfile), so settlement runs the same engine. One
+  # container, `airflow standalone`: API server, scheduler, DAG processor
+  # and triggerer, with LocalExecutor on the shared PostgreSQL. The UI needs
+  # no login -- acceptable for a local demo, never for anything shared.
+  airflow:
+    build:
+      context: .
+      dockerfile: docker/airflow.Dockerfile
+    image: smartgrid-airflow:3.1.0
+    container_name: sg-airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    command: ["standalone"]
+    environment:
+      _AIRFLOW_DB_MIGRATE: "true"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_AIRFLOW_DB}
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__PARALLELISM: "8"
+      AIRFLOW__CORE__DAGS_FOLDER: /app/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "20"
+      AIRFLOW__API__WORKERS: "1"
+      # Fixed secrets so every Airflow component signs and verifies with the
+      # same keys. Development values: override them in .env.
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-smartgrid-dev-jwt-secret-change-me}
+      AIRFLOW__API__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-smartgrid-dev-secret-key-change-me}
+    volumes:
+      - ./:/app:ro
+      - airflow-logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"          # Airflow UI and REST API
+    restart: unless-stopped
+
 volumes:
   kafka-data:
   pg-data:
   minio-bitnami-data:
   spark-checkpoints:
+  airflow-logs:

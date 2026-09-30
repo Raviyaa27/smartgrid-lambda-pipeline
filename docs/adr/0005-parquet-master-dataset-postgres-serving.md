@@ -187,3 +187,34 @@ dead-letter topic.
 Consequence: the archive is not itself a deduplicated table, and any reader
 other than the batch layer must deduplicate by `event_id` too.
 
+
+### Amendment 2 — 2026-09-30: settlement snapshots the day rather than rewriting it; serving rows are per run
+
+The mitigations above say batch writes are *overwrite-by-partition*, and
+that settlement compacts the speed layer's small files by *rewriting the
+day's partition*. Building the batch layer replaced both.
+
+**The raw partition is never rewritten.** Late readings keep arriving after
+a day is settled: a meter that reconnects uploads its backlog into the
+day's partition, and the next restatement must see it. Without a table
+format there is no transactional overwrite. Rewriting `readings/dt=D/`
+while the speed layer may be appending to it could delete a file written
+after the rewrite started. Instead, each settlement run writes what it
+settled -- re-validated, deduplicated, one file -- to its own immutable
+snapshot, `settled/dt=D/run=N/`, and records the path on the run. The raw
+partition stays exactly as the stream wrote it, and a snapshot is the
+compacted, auditable copy of the day as billed.
+
+**Serving rows are appended per run, not overwritten.** Overwrite-by-date
+would delete a day's original bills when it is restated, and those are the
+figures an auditor or a disputing customer needs to see. Every run inserts
+rows keyed by `run_id`, in one transaction, and `batch.current_*` views
+select the latest successful run for each day. This keeps both properties
+the original mitigation wanted: a failed run leaves the previous figures in
+service, and re-running a day replaces what is served without adding to
+it.
+
+Consequence: the raw partition keeps the stream's small files, and a
+restatement reads them. That cost is small at this project's scale, and the
+existing "Revisit if" already covers it. A table format such as Iceberg or
+Delta would allow transactional compaction of the raw partition itself.

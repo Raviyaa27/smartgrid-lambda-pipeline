@@ -1,0 +1,13 @@
+# Added to the official Airflow image. Installed under Airflow's constraints
+# file, so these resolve to versions Airflow itself was tested with.
+#
+# PySpark is NOT listed here: see docker/airflow.Dockerfile.
+
+pandas
+pyarrow
+numpy
+psycopg[binary]
+pydantic-settings
+python-dotenv
+prometheus-client
+boto3

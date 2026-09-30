@@ -1,7 +1,7 @@
 """
 One SparkSession configuration for both Lambda layers.
 
-The speed layer and the batch layer (Section 7) build their sessions here,
+The speed layer and the batch layer build their sessions here,
 so they share an engine AND its settings -- in particular the UTC session
 time zone, without which `to_date(event_time)` would partition readings by
 the container's local date and the two layers could disagree about which

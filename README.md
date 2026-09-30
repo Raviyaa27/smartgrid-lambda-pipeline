@@ -66,7 +66,11 @@ and `SIM_START_DATE`. See [ADR-0007](docs/adr/0007-simulated-clock-and-time-comp
 
 ## Quick start
 
-Requires Docker Desktop (~8 GB free RAM) and Python 3.12.
+Requires Docker Desktop and Python 3.12. The full stack uses about 6 GB of
+memory while a day is being settled. With less free, settlement slows from
+about a minute and a half to several minutes, and Docker Desktop itself can
+fail. Close memory-heavy applications before a demo, and turn off Docker
+Desktop's automatic update downloads while recording.
 
 ```bash
 cp .env.example .env
@@ -171,6 +175,49 @@ http://localhost:4040 and its Prometheus metrics at http://localhost:9103.
 Before a demo, start a completely fresh simulation -- clock back to day 1,
 the archive, real-time tables and Kafka topics cleared -- with `.\scripts\dev.ps1 sim-reset` (or `make sim-reset`).
 
+### The batch layer
+
+Airflow 3.1 runs in its own container (`docker/airflow.Dockerfile`: the
+official image plus the same Spark 3.5.9 runtime as the speed layer). Its UI
+is at http://localhost:8080 and needs no login. Two DAGs:
+
+- **`sim_clock_tick`** runs every real minute. It works out which simulated
+  days have ended (plus 45 simulated minutes' grace) and triggers
+  `daily_settlement` once for each, with the date as a parameter.
+- **`daily_settlement`** settles one day:
+
+  ```
+  wait_for_drop -> wait_for_archive -> quality_gate -> settle -> reconcile -> report
+  ```
+
+  The quality gate fails closed: a drop that fails its checks stops the run
+  before any bill is written. `settle` is a Spark job that re-validates the
+  archived readings with today's rules, removes retransmissions across the
+  whole day, bills every household with the drop's tariff, and writes a
+  snapshot of exactly what it settled to `s3a://lake/settled/dt=<date>/run=<id>/`.
+  `reconcile` measures the speed layer's error per zone against the settled
+  figures, and `report` publishes an HTML report to
+  `s3://lake/reports/dt=<date>/run=<id>/daily_report.html`.
+
+Every run writes its own rows, so nothing is overwritten. The serving layer
+reads the `batch.current_*` views, which pick the latest successful run for
+each day. See the runs, their bills and the speed-vs-batch gap:
+
+```bash
+python scripts/inspect_settlement.py
+python scripts/inspect_settlement.py --date 2026-01-01
+```
+
+**Restating a day** -- after a backdated tariff revision, for example -- is
+re-running the DAG for that date. The new run's bills sit beside the
+originals, and its report states the change and the reason:
+
+```bash
+python -m smartgrid.producers.daily_batch_source revise --date 2026-01-01 \
+    --rate-change 10 --tier DOMESTIC_STD --reason "Regulator backdated revision"
+python scripts/settle.py --date 2026-01-01 --restate --reason "Regulator backdated revision"
+```
+
 ### Task runner
 
 | Task | Windows | Linux / macOS |
@@ -189,6 +236,9 @@ the archive, real-time tables and Kafka topics cleared -- with `.\scripts\dev.ps
 | Reconcile the speed layer | `.\scripts\dev.ps1 speed` | `make speed` |
 | Follow speed-layer logs | `.\scripts\dev.ps1 speed-logs` | `make speed-logs` |
 | Spark tests (in the image) | `.\scripts\dev.ps1 spark-test` | `make spark-test` |
+| Settlement runs, bills, speed vs batch | `.\scripts\dev.ps1 settlement` | `make settlement` |
+| Follow Airflow logs | `.\scripts\dev.ps1 airflow-logs` | `make airflow-logs` |
+| Settle / restate a day | `python scripts/settle.py --date D [--restate --reason R]` | same |
 | New simulation (everything) | `.\scripts\dev.ps1 sim-reset` | `make sim-reset` |
 
 ### Consoles
@@ -198,6 +248,7 @@ the archive, real-time tables and Kafka topics cleared -- with `.\scripts\dev.ps
 | Kafka UI | http://localhost:8085 | — |
 | MinIO Console | http://localhost:9001 | `minioadmin` / `minioadmin123` |
 | Spark UI (speed layer) | http://localhost:4040 | — |
+| Airflow | http://localhost:8080 | — (no login; local demo only) |
 
 ## Repository layout
 
@@ -227,7 +278,7 @@ tests/               unit and integration tests
 | Streaming producer | Complete — physical model, 8 fault types, 100% measured detection |
 | Daily batch source | Complete — versioned drops, tariff as data, 8 fault types, quality gate at 100% |
 | Speed layer | Complete — Spark 3.5 in Docker; reconciled to the message across a restart |
-| Batch settlement layer | Not started |
+| Batch settlement layer | Complete — Airflow 3.1 + Spark; quality gate, bills, reconciliation, daily report, restatement |
 | Serving API and dashboards | Not started |
 | Observability (Prometheus, Grafana, alerts) | Not started |
 
@@ -249,3 +300,7 @@ tests/               unit and integration tests
 - Smart meters report fixed-interval readings. A meter that is offline
   produces gaps; on reconnection it may upload the missed intervals late.
 - Airflow shares the serving PostgreSQL instance for its metadata database.
+- Airflow runs as one `airflow standalone` container with LocalExecutor, and
+  its UI has no login. Acceptable for a local demo only.
+- Settlement runs Spark in local mode as a child process of the Airflow
+  task, not on a cluster.

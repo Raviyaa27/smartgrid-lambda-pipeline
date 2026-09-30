@@ -39,7 +39,7 @@ from smartgrid.common.logging import configure_logging, get_logger
 
 log = get_logger(__name__)
 
-LAKE_PREFIXES = ("readings/",)
+LAKE_PREFIXES = ("readings/", "settled/", "reports/")
 
 
 def _recreate_topics(settings: Settings, names: list[str]) -> dict[str, dict[str, Any]]:

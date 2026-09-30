@@ -135,3 +135,87 @@ settlement failure would have nowhere sensible to surface.
 - The DAG count stays at one indefinitely, at which point the operational
   weight may genuinely exceed the benefit — though the backfill argument
   would still need answering.
+
+## Amendments
+
+### Amendment 1 — 2026-09-30: Airflow 3.1, and restatement by date parameter rather than backfill
+
+Building the batch layer changed four details. The decision itself, Airflow
+with restatement as a single command, is unchanged.
+
+**Airflow 3.1, not 2.x.** Airflow 2 reached end of life in April 2026, so a
+new project should not start on it. Version 3 moves the task API to
+`airflow.sdk`, replaces the webserver with an API server, and reserves some
+names in the task context. `reason` and `run_id` are among them, and a task
+argument with either name is rejected at run time. Our DAG files are
+written for 3.1.
+
+**Restatement is re-triggering the DAG with a date, not `airflow backfill`.**
+The Decision above assumed the DAG would read the day from its logical date
+(`{{ ds }}`). An Airflow logical date is wall-clock time, while a simulated
+day lasts 300 real seconds (ADR-0007). Mapping one onto the other would
+bring every logical date into conflict with Airflow's calendar. So
+`daily_settlement` takes the day as a `business_date` parameter and has no
+schedule of its own:
+
+- A `sim_clock_tick` DAG runs every real minute. It triggers settlement once
+  for each simulated day that has ended, plus 45 simulated minutes' grace
+  for the stream's watermark.
+- Each trigger uses a deterministic run id, `settle__<sim_id>__<date>`, with
+  `skip_when_already_exists`, and is recorded in `ops.settlement_triggers`
+  after it succeeds. A crash between the two steps cannot settle a day twice.
+- Restating a day is triggering the same DAG with the same date and a
+  reason: `python scripts/settle.py --date D --restate --reason R`.
+- Every run carries the `sim_id` of the simulation it was triggered for.
+  The quality gate and the Spark job refuse, without retrying, a run whose
+  simulation has since been reset. This was found by running it: after a
+  Docker restart, Airflow resumed a run interrupted before a reset, and that
+  run settled the *new* simulation's half-finished day under its own name.
+
+The property the Decision relied on survives. Restatement is one command
+against one date partition, with retries, sensors and run history. Only the
+command is different.
+
+**Runs are append-only in the serving store.** A settlement run inserts its
+own bills, zone figures and reconciliation, keyed by `run_id`. It never
+overwrites an earlier run. The `batch.current_*` views expose the latest
+*successful* run for each day. A restated day therefore keeps its original
+bills beside the new ones, and the database itself holds the audit trail,
+not only Airflow's run history. A failed run changes nothing that is
+served. See ADR-0005, Amendment 2.
+
+**Settlement runs as a child process, on the speed layer's Spark version.**
+The Airflow image adds a Java runtime and PySpark 3.5.9 with the same
+connector jars as the speed layer, so both layers run the same engine and
+the same shared validation code (ADR-0004). Airflow 3.1's dependency
+constraints pin PySpark 4.0.1, so PySpark is installed separately from
+them. The `settle` task starts Spark with `python -m
+smartgrid.batch.settlement` as a subprocess, passing arguments as a list
+and never through a shell. The JVM therefore starts clean for every run and
+exits with it, rather than living on in a long-running Airflow worker.
+
+**Sensors reschedule; they do not block.** `wait_for_drop` and
+`wait_for_archive` use `mode="reschedule"`, so a waiting sensor holds no
+worker slot. The archive sensor waits until `ops.stream_progress` shows the
+speed layer has archived readings past the end of the day plus the grace
+period.
+
+**Measured on the running system.** A simulated day of 28,245 readings in
+309 archive files settled end to end in 89 s. From the clock tick's trigger
+to the published report, the settle task took 74 s. The Spark job's own
+steps took 50 s:
+
+| Step | Seconds |
+|---|---|
+| List the archive | 9.1 |
+| Read and re-validate | 24.9 |
+| Deduplicate | 2.9 |
+| Aggregate | 9.7 |
+| Write the snapshot | 2.8 |
+| Bill and commit | 0.1 |
+
+The remaining 24 s is starting the JVM and Python in the child process.
+This is well inside the 300 s of one simulated day, so settlement keeps up
+with the clock. Reading many small Parquet files dominates, as ADR-0005
+anticipated. On a host short of memory the same job took over 7 minutes, so
+the host needs about 6 GB free for the stack (see the README).
