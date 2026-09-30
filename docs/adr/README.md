@@ -17,7 +17,8 @@ architecture drove the build rather than being reverse-engineered from it.
 | [0004](0004-shared-transformation-module.md) | One shared transformation module for both layers | Accepted |
 | [0005](0005-parquet-master-dataset-postgres-serving.md) | Parquet on object storage as master dataset, PostgreSQL as serving store | Accepted |
 | [0006](0006-airflow-for-orchestration.md) | Airflow for batch orchestration | Accepted |
-| [0007](0007-simulated-clock-and-time-compression.md) | Simulated clock at 288x compression | Accepted |
+| [0007](0007-simulated-clock-and-time-compression.md) | Simulated clock at 288x compression | Accepted, amended |
+| [0008](0008-versioned-immutable-daily-drops.md) | Versioned, immutable, manifest-completed daily drops; tariff as data | Accepted |
 
 ADR-0001 is the load-bearing record. Everything else follows from it.
 

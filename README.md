@@ -116,6 +116,40 @@ Useful simulator options: `--faults none|realistic|chaos`, and
 offline (the lever for demonstrating the no-data alert). Prometheus metrics
 are served on port 9101.
 
+### Run the daily batch source
+
+Publishes one reference drop per simulated day -- the day's tariff schedule,
+each household's tier and subsidy, and the weather forecast -- to
+`raw/daily/dt=<date>/v=<n>/` in MinIO, at 00:30 simulated time. Drops are
+never overwritten; corrections are new versions ([ADR-0008](docs/adr/0008-versioned-immutable-daily-drops.md)).
+
+```bash
+python -m smartgrid.producers.daily_batch_source follow
+```
+
+Run the batch layer's quality gate over every drop and compare it with the
+faults that were injected:
+
+```bash
+python scripts/inspect_drops.py
+python scripts/inspect_drops.py --date 2026-01-03
+```
+
+Publish a retroactive tariff revision -- the scenario that forces the batch
+layer to restate a past day:
+
+```bash
+python -m smartgrid.producers.daily_batch_source revise --date 2026-01-03 \
+    --rate-change 10 --tier DOMESTIC_STD --reason "Regulator backdated revision"
+```
+
+Other commands: `publish --date D [--corrupt KIND]` publishes or republishes
+one day (republishing is how a bad drop is recovered); `reset --yes` deletes
+every drop to begin a new simulation.
+
+Before a demo, start a completely fresh simulation -- clock back to day 1,
+all drops removed -- with `.\scripts\dev.ps1 sim-reset` (or `make sim-reset`).
+
 ### Task runner
 
 | Task | Windows | Linux / macOS |
@@ -129,6 +163,9 @@ are served on port 9101.
 | Run meter simulator | `.\scripts\dev.ps1 produce` | `make produce` |
 | ...with 10x faults | `.\scripts\dev.ps1 chaos` | `make chaos` |
 | Measure fault detection | `.\scripts\dev.ps1 inspect` | `make inspect` |
+| Run daily batch source | `.\scripts\dev.ps1 drop` | `make drop` |
+| Gate every daily drop | `.\scripts\dev.ps1 drops` | `make drops` |
+| New simulation (clock + drops) | `.\scripts\dev.ps1 sim-reset` | `make sim-reset` |
 
 ### Consoles
 
@@ -161,9 +198,9 @@ tests/               unit and integration tests
 |---|---|
 | Infrastructure (Kafka, PostgreSQL, MinIO) | Complete |
 | Foundation package (`smartgrid.common`) | Complete |
-| Architecture decision records | Complete — 7 records |
+| Architecture decision records | Complete — 8 records |
 | Streaming producer | Complete — physical model, 8 fault types, 100% measured detection |
-| Daily batch source | Not started |
+| Daily batch source | Complete — versioned drops, tariff as data, 8 fault types, quality gate at 100% |
 | Speed layer | Not started |
 | Batch settlement layer | Not started |
 | Serving API and dashboards | Not started |
@@ -172,6 +209,8 @@ tests/               unit and integration tests
 ## Assumptions and simplifications
 
 - Time is compressed 288×; see the simulated clock section above.
+- The tariff schedule is identical every day unless revised; real tariffs
+  change rarely, and revisions are published explicitly with `revise`.
 - Tariff block limits are published monthly and pro-rated to the daily
   settlement period. A real utility accumulates month-to-date consumption and
   charges the marginal block.

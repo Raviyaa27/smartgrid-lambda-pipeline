@@ -31,6 +31,13 @@ try {
         "produce"     { python -m smartgrid.producers.meter_simulator }
         "chaos"       { python -m smartgrid.producers.meter_simulator --faults chaos }
         "inspect"     { python scripts/inspect_stream.py --seconds 30 }
+        "drop"        { python -m smartgrid.producers.daily_batch_source follow }
+        "drops"       { python scripts/inspect_drops.py }
+        "sim-reset"   {
+            Write-Host "Starting a NEW simulation: clock back to day 1, all daily drops deleted..." -ForegroundColor Yellow
+            python -m smartgrid.common.clock_store reset
+            python -m smartgrid.producers.daily_batch_source reset --yes
+        }
 
         default  {
             Write-Host ""
@@ -53,6 +60,9 @@ try {
             Write-Host "    produce      run the meter simulator (Ctrl+C to stop)"
             Write-Host "    chaos        run it with ~10x the realistic fault rate"
             Write-Host "    inspect      measure fault detection on the live stream"
+            Write-Host "    drop         run the daily batch source (Ctrl+C to stop)"
+            Write-Host "    drops        run the quality gate over every daily drop"
+            Write-Host "    sim-reset    new simulation: reset the clock AND delete all drops"
             Write-Host ""
         }
     }

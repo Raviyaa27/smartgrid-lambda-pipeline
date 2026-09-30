@@ -73,6 +73,7 @@ class Settings(BaseSettings):
 
     # -- Observability ---------------------------------------------------
     producer_metrics_port: int = 9101
+    batch_source_metrics_port: int = 9102
 
     # -- Runtime context -------------------------------------------------
     running_in_docker: bool = Field(default_factory=_in_docker)
