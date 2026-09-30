@@ -41,6 +41,8 @@ try {
         "airflow-logs" { docker compose logs -f --tail=100 airflow }
         "api-logs"    { docker compose logs -f --tail=100 api }
         "dashboard-logs" { docker compose logs -f --tail=100 dashboard }
+        "alerts"      { python scripts/alerts.py --targets }
+        "alerts-test" { docker run --rm --entrypoint promtool -v "${PWD}/infra/prometheus:/etc/prometheus:ro" prom/prometheus:v3.5.1 test rules /etc/prometheus/tests/rules_test.yml }
         "sim-reset"   {
             Write-Host "Starting a NEW simulation: clock to day 1; drops, archive, settlements, tables and Kafka topics cleared." -ForegroundColor Yellow
             Write-Host "Stop the meter simulator and daily batch source first; restart them afterwards." -ForegroundColor Yellow
@@ -80,6 +82,8 @@ try {
             Write-Host "    airflow-logs follow Airflow's logs"
             Write-Host "    api-logs     follow the serving API's logs"
             Write-Host "    dashboard-logs  follow the dashboard's logs"
+            Write-Host "    alerts       alerts firing or pending, and scrape targets"
+            Write-Host "    alerts-test  unit-test the alert rules with promtool"
             Write-Host "    sim-reset    new simulation: clock, drops, archive, settlements, tables and topics"
             Write-Host ""
         }

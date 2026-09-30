@@ -301,7 +301,7 @@ structurally, not by discipline:
 \node[font=\tiny, align=center, text width=2.3cm] at ($(pg.center)+(0,-1.6)$) {\textbf{\color{batchc}batch.*}\\settled bills and zones;\\\code{current_*} views};
 % -- serving (right column)
 \node[srv] (api) at (13.1,2.15) {\textbf{Serving API}\\FastAPI, merge rule:\\settled days from batch,\\today from speed};
-\node[srv, wip] (dash) at (13.1,4.3) {\textbf{Dashboards}\\Streamlit: business\\Grafana: operations};
+\node[srv] (dash) at (13.1,4.3) {\textbf{Dashboards}\\Streamlit: business\\Grafana: operations};
 \node[srv] (report) at (13.1,0) {\textbf{Daily report}\\HTML per settlement\\\code{lake/reports/}};
 % -- flows
 \draw[flow] (meter) -- (kafka);
@@ -314,7 +314,7 @@ structurally, not by discipline:
 \draw[flow] (speed.east) -- (speed.east -| pg.west);
 \draw[flow] (batch.east) -- (batch.east -| pg.west);
 \draw[flow] (pg.east |- api.west) -- (api.west);
-\draw[flow, dashed] (api) -- (dash);
+\draw[flow] (api) -- (dash);
 \draw[flow] (pg.east |- report.west) -- (report.west);
 % -- observability band
 \node[draw=ink!50, fill=yellow!7, rounded corners=2pt, text width=15.6cm, minimum height=0.72cm,
@@ -322,12 +322,12 @@ structurally, not by discipline:
   {\textbf{Observability, every stage:} structured JSON logs with correlation ids \,$\cdot$\,
    Prometheus metrics (:9101 producer, :9102 batch source, :9103 speed layer, :8000 API) \,$\cdot$\,
    \code{ops.*} run tables \,$\cdot$\, dead-letter topic \,$\cdot$\, Airflow run history
-   \,$\cdot$\, Prometheus server, Grafana and alert rules (in progress)};
+   \,$\cdot$\, scraped by Prometheus every 10\,s; 8 tested alert rules; Grafana};
 \end{tikzpicture}
 \caption{Architecture. The top row is the speed path (\sq1), the bottom row the batch path (\sq2). They share the
 Parquet master dataset, which the speed layer writes and the batch layer recomputes from. PostgreSQL keeps
 provisional (\code{speed}) and settled (\code{batch}) figures in separate schemas, so a consumer cannot confuse
-them. Every component reads one simulated clock, anchored in \code{ops.sim_clock}. Dashed components are being built.}
+them. Every component reads one simulated clock, anchored in \code{ops.sim_clock}.}
 \label{fig:arch}
 \end{figure}
 
@@ -647,34 +647,73 @@ Run bookkeeping & \code{ops.ingest_batches}, \code{quarantine_counts}, \code{str
 Dead-letter topic & Every rejected message with reason and source partition and offset; 14-day retention (longer than the source's 7 days). & Evidence survives until someone investigates. \\
 Orchestration & Airflow run history; the settle task streams Spark's output and per-step timings into its log. & A slow or failed settlement is diagnosed from its log. \\
 Serving API (:8000) & Requests and latency per route \emph{template} (bounded label cardinality); a JSON log line per request with a request id echoed in \code{X-Request-ID}; \code{/health} reports speed-layer lag against the 60\,s target. & What consumers saw, and whether it was fresh. \\
+Pipeline state (:8000) & Computed at each scrape from the serving store: each zone's data age, solar share, load and alert-hours flag; the speed layer's lag; days ended, settled, unsettled and refused. Ages in \emph{real} seconds. & The business state no single component knows, on the same figures the dashboard shows. \\
 Health checks & Docker health checks on Kafka, PostgreSQL and MinIO (bucket existence); dependents start only when healthy. & The stack starts in a known state. \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-\textbf{Alert and health-check rules.} Each rule targets a failure that the brief or
-our requirements make costly (\cref{tab:alerts}).
+\textbf{Alert rules.} Prometheus scrapes every component each 10\,s (pull, so a dead
+component shows as down rather than quiet) and evaluates eight rules
+(\cref{tab:alerts}). Every threshold comes from a requirement or a measurement, not a
+guess, and is in real seconds, the clock operators work on. The rules are code, and
+they are \textbf{unit-tested with \code{promtool}}: synthetic series assert when each
+rule fires, and also when it must \emph{not}. There is no solar alert at night, and no
+six-zone alert storm when the whole speed layer is stale, because \code{ZoneSilent}
+applies only while the stream itself is fresh. Breaking one input on purpose made
+the suite fail, so the tests do test.
 
 \begin{table}[H]
 \centering\small
-\caption{Alert rules, evaluated by Prometheus.}
+\caption{Alert rules (\code{infra/prometheus/rules}), with the basis of each threshold.}
 \label{tab:alerts}
-\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{4.3cm}@{}}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{4.1cm}@{}}
 \toprule
-\textbf{Rule} & \textbf{Condition} & \textbf{Failure it catches} \\
+\textbf{Rule} & \textbf{Fires when} & \textbf{Catches} \\
 \midrule
-No meter data & No readings from a zone for $N$ minutes & Feeder or network outage; producer down \\
-Low renewable share & Zone renewable share below threshold in daylight & The use case's operational alert \\
-High quarantine rate & Rejected / processed above threshold over 5 minutes & Upstream schema or firmware fault \\
-Speed layer stale & Last micro-batch older than 60\,s & Freshness target R1 breached; stream job down \\
-Settlement overdue & A simulated day not settled within its window, or gate rejected & Missing or corrupt drop; batch failure \\
+\code{SpeedLayerStale} & real-time view $>$ 60\,s behind the clock (R1) & speed layer behind or stopped \\
+\code{ZoneSilent} & one zone's data $>$ 60\,s old while the stream is fresh & feeder or network outage \\
+\code{LowRenewableShare} & zone solar share $<$ 30\,\% during 10:00--14:00 & the use case's operational alert \\
+\code{HighQuarantineRate} & $>$ 5\,\% of readings rejected for 1\,min (baseline 0.7\,\%) & upstream firmware or schema fault \\
+\code{DropRefused} & the quality gate refused a day's drop & no bills until it is republished \\
+\code{SettlementOverdue} & a day unsettled $>$ 360\,s after it was due (normal: ${\approx}90$\,s) & missing drop, failed job \\
+\code{ScrapeTargetDown}, \code{ServingStoreDown} & a component or PostgreSQL stops answering for 30\,s & process or database down \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-\pending{Section 10. Confirm thresholds and PromQL for each rule once implemented; add the
-Grafana operations dashboard screenshot, and one screenshot of an alert firing (e.g.\ a
-zone silenced with the simulator's \code{--silence-zone} option).}
+The solar floor is exported by the API from the same setting the business dashboard
+uses, so the dashboard warning and the alert cannot disagree. Grafana shows it all on
+one provisioned dashboard (\cref{fig:grafana}). Its JSON is generated from a short
+script, so a panel change is a reviewable diff. Alertmanager was left out
+deliberately: nobody is paged in a demo, and adding it later changes routing, not the
+rules (ADR-0009).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.84\linewidth]{figures/grafana_operations.png}
+\caption{Grafana during the live run (top section). The tiles show status by colour
+\emph{and} number: \code{DropRefused} fires for day 2's refused drop, while the
+real-time view is 6.3\,s behind and 0.7\,\% of readings are rejected (the baseline).
+Further panels cover lag, micro-batch times, solar share and load by zone, the
+settlement backlog and API traffic.}
+\label{fig:grafana}
+\end{figure}
+
+\textbf{Verified live.} In a fresh simulation, every alert state change was logged as it
+happened:
+\begin{itemize}
+  \item \code{ZoneSilent} fired for ZONE-C \emph{alone}, 106\,s after the simulator took
+  the zone offline. It resolved 21\,s after the zone returned and uploaded its backlog.
+  \item \code{DropRefused} fired when the gate refused day 2's deliberately truncated
+  drop. It resolved as soon as the republished drop passed, and the day then settled.
+  \item \code{LowRenewableShare} went pending twice for ZONE-B at midday. The share never
+  stayed below 30\,\% for the required 20\,s, so it correctly did not fire: the
+  \code{for} clause absorbs flicker that the dashboard's instantaneous warning shows.
+  \item \code{ScrapeTargetDown} fired for components still starting, and resolved
+  11--22\,s after each one's first successful scrape.
+\end{itemize}
+
 
 \textbf{Observability in use.} These signals found four real faults during the build.
 \begin{enumerate*}[label=(\roman*)]
@@ -865,9 +904,7 @@ HH-00071 the page then listed both settlements of day~1: 825.67\,LKR under drop 
 (run 39), and 907.24\,LKR under drop v2 (run 40), marked as the bill now shown, with the
 regulator's reason.
 
-\pending{Section 10. Add the Grafana operations dashboard (one screenshot, two or three
-sentences) and an Airflow grid-view screenshot showing scheduled, restated and
-gate-refused runs.}
+The operations counterpart, the Grafana dashboard, is shown in \cref{fig:grafana}.
 
 % ============================================================================
 \section{Limitations, trade-offs and production scale}

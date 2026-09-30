@@ -14,6 +14,8 @@ from typing import Any
 
 import pandas as pd
 
+from smartgrid.common.clock import in_hours
+
 SETTLED = "Settled (batch layer)"
 PROVISIONAL = "Provisional (speed layer)"
 # Fixed order: colour follows the source, never its position in a result.
@@ -82,8 +84,9 @@ def live_frame(live: dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
-def in_alert_hours(moment: datetime, start_hour: int, end_hour: int) -> bool:
-    return start_hour <= moment.hour < end_hour
+# The same hour test the Prometheus alert uses (via the API's metrics), so the
+# dashboard warning and the alert cannot disagree.
+in_alert_hours = in_hours
 
 
 def low_renewable_zones(

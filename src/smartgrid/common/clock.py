@@ -18,6 +18,23 @@ from datetime import UTC, date, datetime, timedelta
 
 SECONDS_PER_DAY = 86_400.0
 
+# A simulated day counts as ENDED for settlement once this much simulated time
+# has passed after its midnight: enough for the speed layer's 30-minute
+# watermark to close the day's last windows. Shared by the batch layer (when
+# to settle) and the serving layer (what is overdue), so it lives here, in a
+# module both can import without heavy dependencies.
+SETTLEMENT_GRACE = timedelta(minutes=45)
+
+
+def day_end(day: date, grace: timedelta = SETTLEMENT_GRACE) -> datetime:
+    """The simulated instant after which `day` is due for settlement."""
+    return datetime(day.year, day.month, day.day, tzinfo=UTC) + timedelta(days=1) + grace
+
+
+def in_hours(moment: datetime, start_hour: int, end_hour: int) -> bool:
+    """True if `moment`'s hour of day is in [start_hour, end_hour)."""
+    return start_hour <= moment.hour < end_hour
+
 
 @dataclass(frozen=True)
 class SimulatedClock:

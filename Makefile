@@ -1,7 +1,7 @@
-.PHONY: help up down reset logs ps verify test clock clock-reset produce chaos inspect drop drops speed speed-logs spark-test build settlement airflow-logs api-logs dashboard-logs sim-reset
+.PHONY: help up down reset logs ps verify test clock clock-reset produce chaos inspect drop drops speed speed-logs spark-test build settlement airflow-logs api-logs dashboard-logs alerts alerts-test sim-reset
 .DEFAULT_GOAL := help
 
-help:        ; @echo "targets: up down reset logs ps verify | test | clock clock-reset produce chaos inspect drop drops speed speed-logs spark-test build settlement airflow-logs api-logs dashboard-logs sim-reset"
+help:        ; @echo "targets: up down reset logs ps verify | test | clock clock-reset produce chaos inspect drop drops speed speed-logs spark-test build settlement airflow-logs api-logs dashboard-logs alerts alerts-test sim-reset"
 
 # -- Infrastructure --------------------------------------------------------
 up:          ; docker compose up -d --remove-orphans && docker compose ps
@@ -30,4 +30,6 @@ settlement:  ; python scripts/inspect_settlement.py
 airflow-logs: ; docker compose logs -f --tail=100 airflow
 api-logs:    ; docker compose logs -f --tail=100 api
 dashboard-logs: ; docker compose logs -f --tail=100 dashboard
+alerts:      ; python scripts/alerts.py --targets
+alerts-test: ; docker run --rm --entrypoint promtool -v "$(CURDIR)/infra/prometheus:/etc/prometheus:ro" prom/prometheus:v3.5.1 test rules /etc/prometheus/tests/rules_test.yml
 sim-reset:   ; docker compose stop speed-layer airflow && python -m smartgrid.common.simulation reset --yes && docker compose start speed-layer airflow

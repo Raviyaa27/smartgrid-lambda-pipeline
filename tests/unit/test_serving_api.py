@@ -102,6 +102,7 @@ class FakeStore:
             window("ZONE-B", at(TODAY, 11), 2.0, 1.5),
         ]
         self.progress = {"ingest": at(TODAY, 11, 45)}
+        self.verdicts: dict[date, bool] = {DAY1: True, DAY2: True}
 
     def ping(self) -> bool:
         return self.up
@@ -208,6 +209,9 @@ class FakeStore:
 
     def report_html(self, object_key):
         return b"<html>settled</html>"
+
+    def latest_gate_verdicts(self, sim_id):
+        return self.verdicts
 
 
 @pytest.fixture
@@ -419,7 +423,7 @@ def test_metrics_are_labelled_by_route_template_not_raw_path(client):
     client.get("/api/v1/zones/ZONE-B/windows")
     metrics = client.get("/metrics").text
     assert 'route="/api/v1/zones/{zone}/windows"' in metrics
-    assert "ZONE-A" not in metrics
+    assert 'route="/api/v1/zones/ZONE-A/windows"' not in metrics  # no raw paths as labels
 
 
 def test_every_response_carries_a_request_id(client):

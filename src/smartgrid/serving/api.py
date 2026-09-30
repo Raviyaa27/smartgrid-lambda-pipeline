@@ -44,6 +44,7 @@ from smartgrid.serving.merge import (
     date_range,
     zone_source,
 )
+from smartgrid.serving.metrics import PipelineCollector
 from smartgrid.serving.repository import PostgresStore, Row, ServingStore
 
 SERVICE = "serving-api"
@@ -388,6 +389,8 @@ def create_app(
         buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5),
         registry=registry,
     )
+    # Business and pipeline state for the alert rules, read at each scrape.
+    registry.register(PipelineCollector(store, settings))
 
     @app.middleware("http")
     async def observe(request: Request, call_next: Any) -> Response:

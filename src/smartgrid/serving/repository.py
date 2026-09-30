@@ -55,6 +55,7 @@ class ServingStore(Protocol):
     def settlement_runs(self, day: date | None, limit: int) -> list[Row]: ...
     def current_report(self, day: date | None) -> Row | None: ...
     def report_html(self, object_key: str) -> bytes | None: ...
+    def latest_gate_verdicts(self, sim_id: int) -> dict[date, bool]: ...
 
 
 class PostgresStore:
@@ -238,6 +239,16 @@ class PostgresStore:
             "ORDER BY d.business_date DESC LIMIT 1",
             (day, day),
         )
+
+    def latest_gate_verdicts(self, sim_id: int) -> dict[date, bool]:
+        """Each day's most recent quality-gate verdict in this simulation: passed or not."""
+        rows = self._all(
+            "SELECT DISTINCT ON (business_date) business_date, passed "
+            "FROM ops.quality_gate_results WHERE sim_id = %s "
+            "ORDER BY business_date, id DESC",
+            (sim_id,),
+        )
+        return {r["business_date"]: r["passed"] for r in rows}
 
     def report_html(self, object_key: str) -> bytes | None:
         if self._s3 is None:

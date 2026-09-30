@@ -1,0 +1,124 @@
+# Alert rules for smartgrid-lambda-pipeline (ADR-0009).
+#
+# Each rule names the failure it catches and the action it calls for. The
+# thresholds are in REAL seconds (the clocks operators live on), and each is
+# tied to a stated requirement or a measured baseline:
+#
+#   freshness target  60 s        requirement R1: provisional figures <= 60 s old
+#   quarantine rate   5 %         measured baseline 0.7 % (realistic faults)
+#   settlement        360 s       a day settles ~90 s after it is due; 360 s is
+#                                 more than a whole simulated day late
+#   solar floor       exported by the API from Settings, shared with the dashboard
+#
+# `for:` durations are short because simulated time is fast: the solar alert
+# hours (10:00-14:00) last 50 real seconds.
+#
+# Verified by promtool: infra/prometheus/tests/rules_test.yml.
+
+groups:
+  - name: smartgrid.pipeline
+    rules:
+      - alert: ScrapeTargetDown
+        expr: up == 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} is not answering"
+          description: >-
+            Prometheus cannot scrape {{ $labels.job }} at {{ $labels.instance }}.
+            If it is a source, no data is entering the pipeline.
+
+      - alert: ServingStoreDown
+        expr: smartgrid_store_up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "The serving store is not answering"
+          description: >-
+            The API cannot read PostgreSQL: the dashboard and every consumer
+            are without data.
+
+      - alert: SpeedLayerStale
+        expr: smartgrid_speed_layer_lag_real_seconds > 60
+        for: 20s
+        labels:
+          severity: critical
+        annotations:
+          summary: "The real-time view is {{ $value | humanizeDuration }} behind"
+          description: >-
+            The archive trails the simulated clock by more than the 60 s
+            freshness target (R1). The speed layer is behind or stopped.
+
+      - alert: HighQuarantineRate
+        expr: |
+          sum(rate(smartgrid_speed_records_total{outcome!="valid"}[2m]))
+            / sum(rate(smartgrid_speed_records_total[2m])) > 0.05
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of readings are being rejected"
+          description: >-
+            Above 5 % against a 0.7 % baseline: an upstream firmware or schema
+            fault. The dead-letter topic holds every rejected message with its
+            reason.
+
+  - name: smartgrid.grid
+    rules:
+      - alert: ZoneSilent
+        # Only while the stream itself is fresh: if the whole speed layer is
+        # stale, SpeedLayerStale says so once instead of six zone alerts.
+        expr: |
+          smartgrid_zone_data_age_real_seconds > 60
+            and on() smartgrid_speed_layer_lag_real_seconds < 60
+        for: 20s
+        labels:
+          severity: critical
+        annotations:
+          summary: "No meter data from {{ $labels.zone }} for {{ $value | humanizeDuration }}"
+          description: >-
+            The rest of the grid is reporting. A feeder or network outage in
+            {{ $labels.zone }}, or its meters are offline.
+
+      - alert: LowRenewableShare
+        # Judged only in the alert hours: at night every zone is at 0 %.
+        expr: |
+          smartgrid_zone_renewable_share_ratio
+              < on() group_left() smartgrid_renewable_alert_floor_ratio
+            and on(zone) smartgrid_zone_in_alert_hours == 1
+        for: 20s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Solar covers {{ $value | humanizePercentage }} of {{ $labels.zone }} at midday"
+          description: >-
+            Below the solar-share floor while the sun is high: heavy cloud, or
+            rooftop solar in {{ $labels.zone }} is not reaching the grid.
+
+  - name: smartgrid.batch
+    rules:
+      - alert: DropRefused
+        expr: smartgrid_days_refused > 0
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} day(s) blocked: the quality gate refused the daily drop"
+          description: >-
+            No bills are issued for a refused day (fail closed). Republish the
+            drop (daily_batch_source publish --date D), then settle it
+            (scripts/settle.py --date D).
+
+      - alert: SettlementOverdue
+        expr: smartgrid_oldest_unsettled_day_age_real_seconds > 360
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "A day has waited {{ $value | humanizeDuration }} for settlement"
+          description: >-
+            Settlement normally completes about 90 s after a day is due. Check
+            Airflow's daily_settlement runs: a missing drop, a refused drop or
+            a failed Spark job.

@@ -273,6 +273,38 @@ as a link. The dashboard follows the browser's light or dark setting, and its
 charts use a colour-blind-safe palette with a table view under each chart.
 The solar-share floor and its hours are `RENEWABLE_ALERT_*` in `.env`.
 
+### Observability
+
+Every stage logs structured JSON (with correlation ids from meter to
+dead-letter topic, and request ids in the API), and serves Prometheus
+metrics. **Prometheus** (http://localhost:9090) scrapes them every 10 s and
+evaluates the alert rules. **Grafana** (http://localhost:3000, no login
+needed to view) opens on the operations dashboard: pipeline health tiles,
+firing alerts, throughput and rejections, the speed layer's lag and
+micro-batch times, solar share and load by zone, the settlement backlog, and
+API traffic. The design is recorded in ADR-0009.
+
+| Alert | Fires when | Means |
+|---|---|---|
+| `ScrapeTargetDown` | a component stops answering for 30 s | a source, the speed layer or the API is down |
+| `ServingStoreDown` | the API cannot read PostgreSQL | consumers are without data |
+| `SpeedLayerStale` | the real-time view is > 60 s behind (R1) | the speed layer is behind or stopped |
+| `HighQuarantineRate` | > 5 % of readings rejected for 1 min (baseline 0.7 %) | an upstream firmware or schema fault |
+| `ZoneSilent` | one zone's data > 60 s old while the rest is fresh | a feeder or network outage |
+| `LowRenewableShare` | a zone's solar share < 30 % between 10:00 and 14:00 | cloud, or solar not reaching the grid |
+| `DropRefused` | the quality gate refused a day's drop | no bills for that day until it is republished |
+| `SettlementOverdue` | a day unsettled > 360 s after it was due | Airflow, the drop or the Spark job needs attention |
+
+The rules are tested with `promtool`: `.\scripts\dev.ps1 alerts-test` (or
+`make alerts-test`). To see `ZoneSilent` fire, take a zone offline:
+
+```bash
+python -m smartgrid.producers.meter_simulator --silence-zone ZONE-C --silence-after 60 --silence-for 90
+```
+
+The Grafana dashboard is generated: edit `scripts/build_grafana_dashboard.py`,
+then run it to rewrite `infra/grafana/dashboards/smartgrid-operations.json`.
+
 ### Task runner
 
 | Task | Windows | Linux / macOS |
@@ -296,6 +328,8 @@ The solar-share floor and its hours are `RENEWABLE_ALERT_*` in `.env`.
 | Settle / restate a day | `python scripts/settle.py --date D [--restate --reason R]` | same |
 | Follow API logs | `.\scripts\dev.ps1 api-logs` | `make api-logs` |
 | Follow dashboard logs | `.\scripts\dev.ps1 dashboard-logs` | `make dashboard-logs` |
+| Test the alert rules (promtool) | `.\scripts\dev.ps1 alerts-test` | `make alerts-test` |
+| Firing alerts, from the terminal | `.\scripts\dev.ps1 alerts` | `make alerts` |
 | New simulation (everything) | `.\scripts\dev.ps1 sim-reset` | `make sim-reset` |
 
 ### Consoles
@@ -308,6 +342,8 @@ The solar-share floor and its hours are `RENEWABLE_ALERT_*` in `.env`.
 | Airflow | http://localhost:8080 | — (no login; local demo only) |
 | Serving API docs | http://localhost:8000/docs | — |
 | Business dashboard | http://localhost:8501 | — |
+| Grafana (operations) | http://localhost:3000 | view without login; admin: `GRAFANA_ADMIN_*` in `.env` |
+| Prometheus (alerts, targets) | http://localhost:9090/alerts | — |
 
 ## Repository layout
 
@@ -340,7 +376,7 @@ tests/               unit and integration tests
 | Batch settlement layer | Complete — Airflow 3.1 + Spark; quality gate, bills, reconciliation, daily report, restatement |
 | Serving API | Complete — FastAPI; merge rule, provisional/settled labels, bill history, metrics |
 | Business dashboard | Complete — Streamlit over the API; provisional/settled labelling, bill history, audit trail |
-| Observability (Prometheus, Grafana, alerts) | Not started |
+| Observability | Complete — Prometheus with 8 promtool-tested alert rules; Grafana operations dashboard |
 
 ## Assumptions and simplifications
 

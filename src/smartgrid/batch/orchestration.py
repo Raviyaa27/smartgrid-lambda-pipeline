@@ -26,6 +26,7 @@ from typing import Any
 import psycopg
 
 from smartgrid.common import drops, storage
+from smartgrid.common.clock import SETTLEMENT_GRACE
 from smartgrid.common.clock_store import shared_clock
 from smartgrid.common.config import Settings, get_settings
 from smartgrid.common.db import ensure_schema
@@ -36,11 +37,6 @@ from smartgrid.common.logging import get_logger
 log = get_logger(__name__)
 
 SETTLEMENT_DAG = "daily_settlement"
-
-# A day is settled once this much simulated time has passed after its
-# midnight: enough for the speed layer's watermark (30 simulated minutes) to
-# close the day's last windows and for the archive to catch up.
-SETTLEMENT_GRACE = timedelta(minutes=45)
 
 # How many days one tick may trigger. After a long outage the backlog is
 # worked off a few days per minute rather than in one burst.

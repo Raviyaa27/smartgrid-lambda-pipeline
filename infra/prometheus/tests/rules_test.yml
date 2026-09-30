@@ -1,0 +1,188 @@
+# Unit tests for the alert rules, run with promtool:
+#
+#   .\scripts\dev.ps1 alerts-test        (or: make alerts-test)
+#
+# Each test feeds synthetic series and states exactly when an alert must be
+# firing, and when it must NOT -- the negative cases matter as much: no solar
+# alert at night, no per-zone alerts when the whole speed layer is stale.
+
+rule_files:
+  - ../rules/smartgrid.yml
+
+evaluation_interval: 10s
+
+tests:
+  # -- Low solar share: flagged in the alert hours, below the floor, not otherwise
+  - interval: 10s
+    input_series:
+      - series: 'smartgrid_renewable_alert_floor_ratio{job="serving-api",instance="api:8000"}'
+        values: "0.30x12"
+      - series: 'smartgrid_zone_renewable_share_ratio{job="serving-api",instance="api:8000",zone="ZONE-A"}'
+        values: "0.86x12"
+      - series: 'smartgrid_zone_renewable_share_ratio{job="serving-api",instance="api:8000",zone="ZONE-B"}'
+        values: "0.29x12"
+      - series: 'smartgrid_zone_renewable_share_ratio{job="serving-api",instance="api:8000",zone="ZONE-C"}'
+        values: "0x12"
+      - series: 'smartgrid_zone_in_alert_hours{job="serving-api",instance="api:8000",zone="ZONE-A"}'
+        values: "1x12"
+      - series: 'smartgrid_zone_in_alert_hours{job="serving-api",instance="api:8000",zone="ZONE-B"}'
+        values: "1x12"
+      - series: 'smartgrid_zone_in_alert_hours{job="serving-api",instance="api:8000",zone="ZONE-C"}'
+        values: "0x12"   # night in ZONE-C: 0 % solar is normal
+    alert_rule_test:
+      - eval_time: 10s
+        alertname: LowRenewableShare
+        exp_alerts: []    # still pending (for: 20s)
+      - eval_time: 40s
+        alertname: LowRenewableShare
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              zone: ZONE-B
+              job: serving-api
+              instance: api:8000
+            exp_annotations:
+              summary: "Solar covers 29% of ZONE-B at midday"
+              description: "Below the solar-share floor while the sun is high: heavy cloud, or rooftop solar in ZONE-B is not reaching the grid."
+
+  # -- One zone silent while the rest of the grid reports
+  - interval: 10s
+    input_series:
+      - series: 'smartgrid_speed_layer_lag_real_seconds{job="serving-api",instance="api:8000"}'
+        values: "5x12"
+      - series: 'smartgrid_zone_data_age_real_seconds{job="serving-api",instance="api:8000",zone="ZONE-A"}'
+        values: "10x12"
+      - series: 'smartgrid_zone_data_age_real_seconds{job="serving-api",instance="api:8000",zone="ZONE-C"}'
+        values: "30 30 90x10"
+    alert_rule_test:
+      - eval_time: 60s
+        alertname: ZoneSilent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              zone: ZONE-C
+              job: serving-api
+              instance: api:8000
+            exp_annotations:
+              summary: "No meter data from ZONE-C for 1m 30s"
+              description: "The rest of the grid is reporting. A feeder or network outage in ZONE-C, or its meters are offline."
+      - eval_time: 60s
+        alertname: SpeedLayerStale
+        exp_alerts: []
+
+  # -- The whole speed layer stale: one SpeedLayerStale, no ZoneSilent storm
+  - interval: 10s
+    input_series:
+      - series: 'smartgrid_speed_layer_lag_real_seconds{job="serving-api",instance="api:8000"}'
+        values: "120x12"
+      - series: 'smartgrid_zone_data_age_real_seconds{job="serving-api",instance="api:8000",zone="ZONE-A"}'
+        values: "130x12"
+      - series: 'smartgrid_zone_data_age_real_seconds{job="serving-api",instance="api:8000",zone="ZONE-B"}'
+        values: "130x12"
+    alert_rule_test:
+      - eval_time: 60s
+        alertname: ZoneSilent
+        exp_alerts: []
+      - eval_time: 60s
+        alertname: SpeedLayerStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: serving-api
+              instance: api:8000
+            exp_annotations:
+              summary: "The real-time view is 2m 0s behind"
+              description: "The archive trails the simulated clock by more than the 60 s freshness target (R1). The speed layer is behind or stopped."
+
+  # -- Quarantine rate: 10 % fires, the 1 % baseline does not
+  - interval: 10s
+    input_series:
+      - series: 'smartgrid_speed_records_total{job="speed-layer",instance="speed-layer:9103",outcome="valid"}'
+        values: "0+90x30"
+      - series: 'smartgrid_speed_records_total{job="speed-layer",instance="speed-layer:9103",outcome="out_of_range"}'
+        values: "0+10x30"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: HighQuarantineRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "10% of readings are being rejected"
+              description: "Above 5 % against a 0.7 % baseline: an upstream firmware or schema fault. The dead-letter topic holds every rejected message with its reason."
+  - interval: 10s
+    input_series:
+      - series: 'smartgrid_speed_records_total{job="speed-layer",instance="speed-layer:9103",outcome="valid"}'
+        values: "0+99x30"
+      - series: 'smartgrid_speed_records_total{job="speed-layer",instance="speed-layer:9103",outcome="out_of_range"}'
+        values: "0+1x30"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: HighQuarantineRate
+        exp_alerts: []
+
+  # -- Batch layer: a refused drop, and a day waiting too long
+  - interval: 10s
+    input_series:
+      - series: 'smartgrid_days_refused{job="serving-api",instance="api:8000"}'
+        values: "0 0 1x10"
+      - series: 'smartgrid_oldest_unsettled_day_age_real_seconds{job="serving-api",instance="api:8000"}'
+        values: "100 200 300 400x10"
+    alert_rule_test:
+      - eval_time: 10s
+        alertname: DropRefused
+        exp_alerts: []
+      - eval_time: 60s
+        alertname: DropRefused
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: serving-api
+              instance: api:8000
+            exp_annotations:
+              summary: "1 day(s) blocked: the quality gate refused the daily drop"
+              description: "No bills are issued for a refused day (fail closed). Republish the drop (daily_batch_source publish --date D), then settle it (scripts/settle.py --date D)."
+      - eval_time: 40s
+        alertname: SettlementOverdue
+        exp_alerts: []    # over 360 s only from 30 s, and for: 30s
+      - eval_time: 90s
+        alertname: SettlementOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: serving-api
+              instance: api:8000
+            exp_annotations:
+              summary: "A day has waited 6m 40s for settlement"
+              description: "Settlement normally completes about 90 s after a day is due. Check Airflow's daily_settlement runs: a missing drop, a refused drop or a failed Spark job."
+
+  # -- Something stopped answering
+  - interval: 10s
+    input_series:
+      - series: 'up{job="speed-layer",instance="speed-layer:9103"}'
+        values: "0x10"
+      - series: 'up{job="serving-api",instance="api:8000"}'
+        values: "1x10"
+      - series: 'smartgrid_store_up{job="serving-api",instance="api:8000"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 60s
+        alertname: ScrapeTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: speed-layer
+              instance: speed-layer:9103
+            exp_annotations:
+              summary: "speed-layer is not answering"
+              description: "Prometheus cannot scrape speed-layer at speed-layer:9103. If it is a source, no data is entering the pipeline."
+      - eval_time: 60s
+        alertname: ServingStoreDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: serving-api
+              instance: api:8000
+            exp_annotations:
+              summary: "The serving store is not answering"
+              description: "The API cannot read PostgreSQL: the dashboard and every consumer are without data."
