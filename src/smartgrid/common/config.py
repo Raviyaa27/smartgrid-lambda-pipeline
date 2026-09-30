@@ -61,6 +61,7 @@ class Settings:
         "tariffs",
     )
     # --- Add these fields inside the existing Settings dataclass, alongside the MinIO ones ---
+     # --- Add these fields inside the existing Settings dataclass, alongside the MinIO ones ---
 
     postgres_host: str = os.getenv("POSTGRES_HOST", "localhost")
     postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
