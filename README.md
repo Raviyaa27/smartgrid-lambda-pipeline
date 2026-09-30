@@ -147,8 +147,29 @@ Other commands: `publish --date D [--corrupt KIND]` publishes or republishes
 one day (republishing is how a bad drop is recovered); `reset --yes` deletes
 every drop to begin a new simulation.
 
+### The speed layer
+
+`docker compose up -d` builds and starts it: Spark Structured Streaming in
+our own image (`docker/spark.Dockerfile`), reading the readings topic,
+validating every message with the shared validator, archiving valid
+readings to `s3a://lake/readings/dt=<date>/grid_zone=<zone>/`, sending
+rejects to the dead-letter topic, and maintaining provisional per-zone load
+and renewable mix in `speed.zone_metrics`. The first `up` builds the image,
+which takes a few minutes.
+
+Reconcile every stage -- Kafka, processed, dead-lettered, archived -- to
+confirm nothing was lost or double-counted:
+
+```bash
+python scripts/inspect_speed_layer.py
+```
+
+Follow its logs with `.\scripts\dev.ps1 speed-logs`; run its Spark tests
+inside the image with `.\scripts\dev.ps1 spark-test`. The Spark UI is at
+http://localhost:4040 and its Prometheus metrics at http://localhost:9103.
+
 Before a demo, start a completely fresh simulation -- clock back to day 1,
-all drops removed -- with `.\scripts\dev.ps1 sim-reset` (or `make sim-reset`).
+the archive, real-time tables and Kafka topics cleared -- with `.\scripts\dev.ps1 sim-reset` (or `make sim-reset`).
 
 ### Task runner
 
@@ -165,7 +186,10 @@ all drops removed -- with `.\scripts\dev.ps1 sim-reset` (or `make sim-reset`).
 | Measure fault detection | `.\scripts\dev.ps1 inspect` | `make inspect` |
 | Run daily batch source | `.\scripts\dev.ps1 drop` | `make drop` |
 | Gate every daily drop | `.\scripts\dev.ps1 drops` | `make drops` |
-| New simulation (clock + drops) | `.\scripts\dev.ps1 sim-reset` | `make sim-reset` |
+| Reconcile the speed layer | `.\scripts\dev.ps1 speed` | `make speed` |
+| Follow speed-layer logs | `.\scripts\dev.ps1 speed-logs` | `make speed-logs` |
+| Spark tests (in the image) | `.\scripts\dev.ps1 spark-test` | `make spark-test` |
+| New simulation (everything) | `.\scripts\dev.ps1 sim-reset` | `make sim-reset` |
 
 ### Consoles
 
@@ -173,6 +197,7 @@ all drops removed -- with `.\scripts\dev.ps1 sim-reset` (or `make sim-reset`).
 |---|---|---|
 | Kafka UI | http://localhost:8085 | — |
 | MinIO Console | http://localhost:9001 | `minioadmin` / `minioadmin123` |
+| Spark UI (speed layer) | http://localhost:4040 | — |
 
 ## Repository layout
 
@@ -201,7 +226,7 @@ tests/               unit and integration tests
 | Architecture decision records | Complete — 8 records |
 | Streaming producer | Complete — physical model, 8 fault types, 100% measured detection |
 | Daily batch source | Complete — versioned drops, tariff as data, 8 fault types, quality gate at 100% |
-| Speed layer | Not started |
+| Speed layer | Complete — Spark 3.5 in Docker; reconciled to the message across a restart |
 | Batch settlement layer | Not started |
 | Serving API and dashboards | Not started |
 | Observability (Prometheus, Grafana, alerts) | Not started |
@@ -218,6 +243,9 @@ tests/               unit and integration tests
 - MinIO runs from `bitnamilegacy/minio`, a pinned but frozen archive image
   that receives no security updates. MinIO withdrew its own images from both
   docker.io and quay.io. Acceptable for a local demo only.
+- The speed layer runs Spark in local mode (`local[4]`) inside one container.
+  The master dataset is written at-least-once and keeps retransmitted
+  readings; the batch layer deduplicates by `event_id` (ADR-0005, amended).
 - Smart meters report fixed-interval readings. A meter that is offline
   produces gaps; on reconnection it may upload the missed intervals late.
 - Airflow shares the serving PostgreSQL instance for its metadata database.

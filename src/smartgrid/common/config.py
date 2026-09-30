@@ -71,9 +71,21 @@ class Settings(BaseSettings):
     sim_seed: int = 20260101
     sim_fault_profile: str = "realistic"
 
+    # -- Spark (speed layer; batch layer in Section 7) --------------------
+    spark_master: str = "local[4]"
+    spark_driver_memory: str = "1g"
+    spark_checkpoint_root: str = "/checkpoints"      # inside the Spark container
+    # Windows and watermark are in SIMULATED minutes. A reading covers 9.6
+    # simulated minutes, so a 15-minute window sees every meter at least once.
+    speed_window_minutes: int = 15
+    speed_watermark_minutes: int = 30
+    speed_trigger_seconds: int = 5
+    speed_max_offsets_per_trigger: int = 5000
+
     # -- Observability ---------------------------------------------------
     producer_metrics_port: int = 9101
     batch_source_metrics_port: int = 9102
+    speed_layer_metrics_port: int = 9103
 
     # -- Runtime context -------------------------------------------------
     running_in_docker: bool = Field(default_factory=_in_docker)

@@ -9,9 +9,10 @@ That is deliberate. The strongest argument against Lambda is Jay Kreps'
 objection that maintaining two code paths guarantees they eventually
 disagree. This module is the mitigation: the rules are declared once in
 schemas.py and applied by thin adapters here -- `validate_record` for
-row-at-a-time Python, `validate_frame` for vectorised pandas inside Spark.
-Both walk the same FieldSpec table, so a rule change lands in both layers
-simultaneously or in neither.
+row-at-a-time Python, `validate_frame` / `validate_json_frame` for
+vectorised pandas inside Spark. Both adapters share the same coercion
+function and the same definition of "missing", so they agree by
+construction, and a fuzz test holds them to it.
 
 Accepted cost: the Spark path uses pandas UDFs rather than native Catalyst
 expressions, which is slower. We trade throughput for a guarantee of zero
@@ -22,6 +23,7 @@ work in the report's limitations section.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -66,12 +68,33 @@ class ValidationResult:
 # -- Type coercion -------------------------------------------------------
 
 
+def _is_missing(value: Any) -> bool:
+    """
+    The single definition of "no value", shared by both validators: None, an
+    empty string, or NaN/NaT. NaN is included because pandas uses it for an
+    absent value -- a key missing from one JSON record becomes NaN once
+    records share a DataFrame -- and a NaN measurement carries no measurement.
+    """
+    if value is None or value is pd.NaT:
+        return True
+    if isinstance(value, str):
+        return value == ""
+    return isinstance(value, float) and value != value
+
+
 def _parse_timestamp(value: Any) -> datetime:
     """Accept ISO-8601 (with or without trailing Z) or epoch seconds."""
     if isinstance(value, datetime):
         parsed = value
     elif isinstance(value, (int, float)):
-        parsed = datetime.fromtimestamp(float(value), tz=UTC)
+        try:
+            parsed = datetime.fromtimestamp(float(value), tz=UTC)
+        except (OverflowError, OSError, ValueError) as exc:
+            # inf, 1e20 or a large negative number. These must be REJECTED,
+            # not raised: an uncaught error here fails the whole Spark
+            # micro-batch, and the restarted query re-reads the same message
+            # -- a poison pill that stalls the stream for good.
+            raise ValueError(f"timestamp {value!r} is out of range") from exc
     elif isinstance(value, str):
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     else:
@@ -139,7 +162,7 @@ def validate_record(
     for spec in specs:
         value = raw.get(spec.name)
 
-        if value is None or value == "":
+        if _is_missing(value):
             if spec.required:
                 return ValidationResult.reject(
                     QuarantineReason.MISSING_FIELD, f"'{spec.name}' is required"
@@ -207,46 +230,153 @@ def validate_frame(
     rules to the batch layer.
     """
     result = frame.copy()
-    reason = pd.Series([None] * len(result), index=result.index, dtype="object")
-
-    for spec in specs:
-        if spec.name not in result.columns:
-            if spec.required:
-                reason = reason.fillna(QuarantineReason.MISSING_FIELD.value)
-            continue
-
-        column = result[spec.name]
-
-        if spec.required:
-            reason = reason.mask(
-                column.isna() & reason.isna(), QuarantineReason.MISSING_FIELD.value
-            )
-
-        if spec.dtype == "double":
-            numeric = pd.to_numeric(column, errors="coerce")
-            bad_type = numeric.isna() & column.notna()
-            reason = reason.mask(bad_type & reason.isna(), QuarantineReason.WRONG_TYPE.value)
-
-            if spec.min_value is not None:
-                below = (numeric < spec.min_value).fillna(False)
-                reason = reason.mask(below & reason.isna(), QuarantineReason.OUT_OF_RANGE.value)
-            if spec.max_value is not None:
-                above = (numeric > spec.max_value).fillna(False)
-                reason = reason.mask(above & reason.isna(), QuarantineReason.OUT_OF_RANGE.value)
-
-    if known_household_ids is not None and "household_id" in result.columns:
-        unknown = ~result["household_id"].isin(known_household_ids)
-        reason = reason.mask(unknown & reason.isna(), QuarantineReason.UNKNOWN_HOUSEHOLD.value)
-
-    if "event_time" in result.columns:
-        reference = now or datetime.now(UTC)
-        times = pd.to_datetime(result["event_time"], errors="coerce", utc=True)
-        future = (times > (reference + FUTURE_TOLERANCE)).fillna(False)
-        reason = reason.mask(future & reason.isna(), QuarantineReason.FUTURE_TIMESTAMP.value)
-
+    # Python objects, not numpy scalars: a numpy bool_ is not a Python bool,
+    # and would slip past the check that rejects booleans as numbers.
+    columns = {name: result[name].astype(object) for name in result.columns}
+    reason, _ = _frame_verdicts(columns, result.index, specs, known_household_ids, now)
     result["quarantine_reason"] = reason
     result["is_valid"] = reason.isna()
     return result
+
+
+# Marks a value that failed type coercion.
+_BAD = object()
+
+
+def _coerce_or_bad(value: Any, spec: FieldSpec) -> Any:
+    if _is_missing(value):
+        return None
+    try:
+        return _coerce(value, spec)
+    except (TypeError, ValueError):
+        return _BAD
+
+
+def _frame_verdicts(
+    columns: dict[str, pd.Series],
+    index: pd.Index,
+    specs: tuple[FieldSpec, ...],
+    known_household_ids: frozenset[str] | None,
+    now: datetime | None,
+) -> tuple[pd.Series, dict[str, pd.Series]]:
+    """
+    The vectorised validation, returning each row's quarantine reason (None
+    if valid) and the coerced value of every field.
+
+    It reaches the same verdict as `validate_record` BY CONSTRUCTION, not by
+    parallel implementation: type coercion calls the very same `_coerce`,
+    missing values use the same `_is_missing`, and checks run in the same
+    order with the first failure winning. Only the range and cross-field
+    checks are vectorised. `tests/unit/test_validator_parity.py` fuzzes the
+    two against each other.
+    """
+    reason = pd.Series([None] * len(index), index=index, dtype="object")
+    coerced_columns: dict[str, pd.Series] = {}
+
+    def fail(mask: pd.Series, why: QuarantineReason) -> None:
+        nonlocal reason
+        reason = reason.mask(mask.astype(bool) & reason.isna(), why.value)
+
+    for spec in specs:
+        column = columns.get(spec.name)
+        if column is None:
+            if spec.required:
+                reason = reason.fillna(QuarantineReason.MISSING_FIELD.value)
+            coerced_columns[spec.name] = pd.Series([None] * len(index), index=index, dtype=object)
+            continue
+
+        missing = column.map(_is_missing).astype(bool)
+        if spec.required:
+            fail(missing, QuarantineReason.MISSING_FIELD)
+
+        coerced = column.map(lambda value, s=spec: _coerce_or_bad(value, s))
+        bad = coerced.map(lambda value: value is _BAD).astype(bool)
+        fail(bad, QuarantineReason.WRONG_TYPE)
+
+        usable = ~missing & ~bad
+        if spec.min_value is not None:
+            fail(
+                usable
+                & coerced.map(
+                    lambda v, lo=spec.min_value: v is not _BAD and v is not None and v < lo
+                ),
+                QuarantineReason.OUT_OF_RANGE,
+            )
+        if spec.max_value is not None:
+            fail(
+                usable
+                & coerced.map(
+                    lambda v, hi=spec.max_value: v is not _BAD and v is not None and v > hi
+                ),
+                QuarantineReason.OUT_OF_RANGE,
+            )
+
+        coerced_columns[spec.name] = coerced.map(lambda value: None if value is _BAD else value)
+
+    if known_household_ids is not None and "household_id" in coerced_columns:
+        households = coerced_columns["household_id"]
+        fail(
+            ~households.map(lambda h: h in known_household_ids), QuarantineReason.UNKNOWN_HOUSEHOLD
+        )
+
+    if "event_time" in coerced_columns:
+        limit = (now or datetime.now(UTC)) + FUTURE_TOLERANCE
+        future = coerced_columns["event_time"].map(lambda t: isinstance(t, datetime) and t > limit)
+        fail(future, QuarantineReason.FUTURE_TIMESTAMP)
+
+    return reason, coerced_columns
+
+
+def validate_json_frame(
+    raw_values: pd.Series,
+    specs: tuple[FieldSpec, ...] = METER_READING_FIELDS,
+    *,
+    known_household_ids: frozenset[str] | None = None,
+    now: datetime | None = None,
+) -> pd.DataFrame:
+    """
+    Parse and validate a batch of raw JSON messages, as they come off Kafka.
+
+    This is the speed layer's entry point: it sees bytes, some of which are
+    not JSON at all. Returns one row per message with every field of `specs`
+    in its TYPED form (float, UTC timestamp, string) plus `is_valid` and
+    `quarantine_reason`. Malformed JSON -- or JSON that is not an object --
+    is quarantined as `malformed_json`, exactly as `validate_record` does.
+    """
+    index = raw_values.index
+    records: list[dict[str, Any]] = []
+    malformed: list[bool] = []
+    for raw in raw_values:
+        try:
+            parsed = json.loads(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            parsed = None
+        is_object = isinstance(parsed, dict)
+        records.append(parsed if is_object else {})
+        malformed.append(not is_object)
+
+    columns = {
+        spec.name: pd.Series(
+            [record.get(spec.name) for record in records], index=index, dtype=object
+        )
+        for spec in specs
+    }
+    reason, coerced = _frame_verdicts(columns, index, specs, known_household_ids, now)
+    reason = reason.mask(pd.Series(malformed, index=index), QuarantineReason.MALFORMED_JSON.value)
+
+    typed: dict[str, pd.Series] = {}
+    for spec in specs:
+        values = coerced[spec.name]
+        if spec.dtype in ("double", "integer"):
+            typed[spec.name] = pd.to_numeric(values, errors="coerce").astype("float64")
+        elif spec.dtype == "timestamp":
+            typed[spec.name] = pd.to_datetime(values, utc=True, errors="coerce")
+        else:
+            typed[spec.name] = values.astype(object)
+    out = pd.DataFrame(typed, index=index)
+    out["quarantine_reason"] = reason
+    out["is_valid"] = reason.isna()
+    return out
 
 
 # -- Enrichment ----------------------------------------------------------

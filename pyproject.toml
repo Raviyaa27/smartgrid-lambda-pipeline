@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "smartgrid-lambda-pipeline"
 version = "0.1.0"
 description = "Lambda-architecture data platform for smart-grid energy monitoring and billing"
-requires-python = ">=3.12"
+requires-python = ">=3.11"   # 3.11 inside the Spark image; 3.12 elsewhere
 
 # Runtime dependencies are deliberately NOT declared here. They live in
 # requirements.txt with explicit pins, which is what CI and the grader
@@ -22,6 +22,7 @@ testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
     "integration: needs the docker compose stack; skipped automatically when it is down",
+    "spark: needs PySpark and a JVM; run inside the Spark image, skipped elsewhere",
 ]
 
 [tool.ruff]

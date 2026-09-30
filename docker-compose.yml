@@ -150,7 +150,39 @@ services:
       retries: 20
       start_period: 10s
 
+  # ── Speed layer: Spark Structured Streaming (ADR-0002) ───────────────
+  # Our own image (docker/spark.Dockerfile): Python 3.11 + PySpark 3.5 with
+  # the Kafka and S3A connectors baked in at build time. The repository is
+  # mounted read-only at /app, so a code change needs a restart, not a
+  # rebuild. Checkpoints live on a named volume, one directory per
+  # simulation, so the stream resumes exactly where it stopped.
+  speed-layer:
+    build:
+      context: .
+      dockerfile: docker/spark.Dockerfile
+    image: smartgrid-spark:3.5.9
+    container_name: sg-speed-layer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: ["python", "-m", "smartgrid.streaming.speed_layer"]
+    volumes:
+      - ./:/app:ro
+      - spark-checkpoints:/checkpoints
+    ports:
+      - "9103:9103"          # Prometheus metrics
+      - "4040:4040"          # Spark UI
+    # A streaming job is meant to run forever: if it dies, bring it back.
+    restart: unless-stopped
+
 volumes:
   kafka-data:
   pg-data:
   minio-bitnami-data:
+  spark-checkpoints:

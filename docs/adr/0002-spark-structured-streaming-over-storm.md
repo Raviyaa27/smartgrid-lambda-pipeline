@@ -129,3 +129,25 @@ does not outweigh losing engine reuse.
   eliminates the engine-reuse argument that decided this record.
 - Throughput grows to where pandas-UDF overhead in the speed layer dominates,
   forcing the rule-compilation approach described in ADR-0004.
+
+## Amendments
+
+### Amendment 1 — 2026-09-30: `local[4]`, not `local[2]`
+
+The mitigation above says Spark runs in `local[2]` mode. Measured on the
+running speed layer, two cores were too few: the two streaming queries and
+six Kafka partitions competed for them, micro-batches took 10–30 s against
+a 5 s trigger, and the real-time view trailed the simulated clock by about
+2.5 simulated hours (~30 s real). At `local[4]` the same load completes a
+micro-batch every ~5 s and the lag falls to about 30 simulated minutes
+(~6 s real), comfortably inside ADR-0001's 60-second freshness target. The
+decision is unchanged; only the core count is.
+
+Two related facts established by running it, not assumed:
+
+- The speed layer resumes from its checkpoint after a restart. Micro-batch
+  ids continued at 9 after 1–8, with no replay from zero and no gap.
+- The Spark plan that deduplicates by `event_id` within the watermark and
+  then aggregates by window, in `update` output mode, is accepted by Spark
+  3.5 and runs as designed.
+

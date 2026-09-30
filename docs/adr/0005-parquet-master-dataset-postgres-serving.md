@@ -161,3 +161,29 @@ redundant.
   Iceberg or Delta.
 - Small-file pressure appears before the daily compaction runs, which would
   mean the compaction interval is too coarse for the write rate.
+
+## Amendments
+
+### Amendment 1 — 2026-09-30: the master dataset keeps duplicates; the batch layer removes them
+
+When the speed layer was built, the obvious design -- deduplicate readings
+by `event_id` before archiving them -- turned out to conflict with the
+purpose of the archive.
+
+Deduplication in a stream has to be bounded, or its state grows forever.
+Spark bounds it with a watermark, and a watermark-bounded operator also
+**discards every reading older than the watermark**. Those late readings --
+meters reconnecting and uploading hours of backlog -- are precisely what the
+batch layer exists to recover (ADR-0001). Deduplicating before the archive
+would silently delete them.
+
+**Decided:** the archive keeps every valid reading, retransmissions
+included, written at-least-once. Deduplication happens where it is safe:
+in the speed layer's real-time view, within the watermark, and in the batch
+layer, which reads a whole day and deduplicates by `event_id` with no
+watermark at all. Rejected readings never reach the archive; they go to the
+dead-letter topic.
+
+Consequence: the archive is not itself a deduplicated table, and any reader
+other than the batch layer must deduplicate by `event_id` too.
+

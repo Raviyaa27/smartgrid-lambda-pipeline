@@ -33,10 +33,16 @@ try {
         "inspect"     { python scripts/inspect_stream.py --seconds 30 }
         "drop"        { python -m smartgrid.producers.daily_batch_source follow }
         "drops"       { python scripts/inspect_drops.py }
+        "speed-logs"  { docker compose logs -f --tail=100 speed-layer }
+        "speed"       { python scripts/inspect_speed_layer.py }
+        "spark-test"  { docker compose run --rm --no-deps speed-layer python -m pytest tests/spark -p no:cacheprovider }
+        "build"       { docker compose build speed-layer }
         "sim-reset"   {
-            Write-Host "Starting a NEW simulation: clock back to day 1, all daily drops deleted..." -ForegroundColor Yellow
-            python -m smartgrid.common.clock_store reset
-            python -m smartgrid.producers.daily_batch_source reset --yes
+            Write-Host "Starting a NEW simulation: clock to day 1; drops, archive, real-time tables and Kafka topics cleared." -ForegroundColor Yellow
+            Write-Host "Stop the meter simulator and daily batch source first; restart them afterwards." -ForegroundColor Yellow
+            docker compose stop speed-layer
+            python -m smartgrid.common.simulation reset --yes
+            if ($?) { docker compose start speed-layer }
         }
 
         default  {
@@ -62,7 +68,11 @@ try {
             Write-Host "    inspect      measure fault detection on the live stream"
             Write-Host "    drop         run the daily batch source (Ctrl+C to stop)"
             Write-Host "    drops        run the quality gate over every daily drop"
-            Write-Host "    sim-reset    new simulation: reset the clock AND delete all drops"
+            Write-Host "    speed-logs   follow the speed layer's logs"
+            Write-Host "    speed        reconcile the speed layer: Kafka, archive, dead letters"
+            Write-Host "    spark-test   run the Spark tests inside the Spark image"
+            Write-Host "    build        rebuild the Spark image"
+            Write-Host "    sim-reset    new simulation: clock, drops, archive, tables and topics"
             Write-Host ""
         }
     }
