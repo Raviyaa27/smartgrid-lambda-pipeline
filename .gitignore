@@ -39,3 +39,5 @@ Thumbs.db
 .DS_Store
 .idea/
 .vscode/
+# Local launch configurations for the Claude desktop preview
+.claude/launch.json

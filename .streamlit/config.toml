@@ -1,0 +1,23 @@
+# Streamlit settings for the business dashboard (src/smartgrid/dashboard/app.py).
+# Read from the working directory: the repo root locally, /app in Docker.
+
+[server]
+headless = true
+runOnSave = false
+
+[browser]
+gatherUsageStats = false
+
+# Surfaces and ink match the chart palette (src/smartgrid/dashboard/charts.py),
+# so charts and page agree in both modes. Dark is its own set of steps.
+[theme.light]
+backgroundColor = "#f9f9f7"
+secondaryBackgroundColor = "#f0efec"
+textColor = "#0b0b0b"
+primaryColor = "#2a78d6"
+
+[theme.dark]
+backgroundColor = "#0d0d0d"
+secondaryBackgroundColor = "#1a1a19"
+textColor = "#ffffff"
+primaryColor = "#3987e5"

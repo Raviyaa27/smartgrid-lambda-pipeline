@@ -76,6 +76,14 @@ class ZoneInfo(BaseModel):
     with_solar: int
 
 
+class HouseholdInfo(BaseModel):
+    household_id: str
+    grid_zone: str
+    tariff_tier: str
+    has_solar: bool
+    solar_capacity_kw: float
+
+
 class ZoneWindow(BaseModel):
     grid_zone: str
     window_start: datetime
@@ -590,6 +598,26 @@ def create_app(
         )
 
     # -- Billing (question 2) ------------------------------------------------------------
+
+    @app.get(f"{API}/households", response_model=list[HouseholdInfo], tags=["billing"])
+    def households(
+        fleet: FleetDep,
+        zone: Annotated[str | None, Query(description="Filter by grid zone")] = None,
+    ) -> list[HouseholdInfo]:
+        """The billable households: the fleet the meters and the daily drops describe."""
+        if zone is not None:
+            _zone(zone, fleet)
+        return [
+            HouseholdInfo(
+                household_id=h.household_id,
+                grid_zone=h.grid_zone,
+                tariff_tier=h.tariff_tier,
+                has_solar=h.has_solar,
+                solar_capacity_kw=h.solar_capacity_kw,
+            )
+            for h in fleet.households
+            if zone is None or h.grid_zone == zone
+        ]
 
     @app.get(
         f"{API}/households/{{household_id}}/bills",

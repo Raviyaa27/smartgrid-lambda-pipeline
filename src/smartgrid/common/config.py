@@ -85,6 +85,19 @@ class Settings(BaseSettings):
     # -- Serving API -----------------------------------------------------
     api_port: int = 8000
     api_max_range_days: int = 31  # longest date range one request may ask for
+    api_url_host: str = "http://localhost:8000"
+    api_url_docker: str = "http://api:8000"
+    # What the VIEWER's browser can reach, for links the dashboard renders.
+    api_public_url: str = "http://localhost:8000"
+
+    # -- Business dashboard ------------------------------------------------
+    dashboard_port: int = 8501
+    dashboard_refresh_seconds: int = 10
+    # Solar below this share of consumption, while the sun is high, is flagged.
+    # Calibrated on the simulation: 10:00-14:00 zone shares run 0.25-1.8.
+    renewable_alert_floor: float = 0.30
+    renewable_alert_start_hour: int = 10  # simulated local hour, inclusive
+    renewable_alert_end_hour: int = 14  # simulated local hour, exclusive
 
     # -- Observability ---------------------------------------------------
     producer_metrics_port: int = 9101
@@ -104,6 +117,11 @@ class Settings(BaseSettings):
     @property
     def s3_endpoint(self) -> str:
         return self.minio_endpoint_docker if self.running_in_docker else self.minio_endpoint_host
+
+    @property
+    def api_url(self) -> str:
+        """Serving API address correct for wherever this process is running."""
+        return self.api_url_docker if self.running_in_docker else self.api_url_host
 
     @property
     def postgres_host_resolved(self) -> str:

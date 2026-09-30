@@ -1,0 +1,9 @@
+# Python dependencies of the business dashboard image. It talks only to the
+# serving API, so no database or Spark client is needed.
+streamlit~=1.64
+plotly~=5.24
+pandas~=2.2
+requests~=2.32
+pydantic~=2.9
+pydantic-settings~=2.6
+python-dotenv~=1.0

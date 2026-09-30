@@ -1,8 +1,8 @@
 # ═══════════════════════════════════════════════════════════════════════
 #  smartgrid-lambda-pipeline — infrastructure
 #  Kafka, PostgreSQL and MinIO (+ Kafka UI); the Spark speed layer;
-#  Airflow running the Spark batch layer; and the serving API.
-#  Prometheus and Grafana to come.
+#  Airflow running the Spark batch layer; the serving API; and the
+#  business dashboard. Prometheus and Grafana to come.
 # ═══════════════════════════════════════════════════════════════════════
 name: smartgrid
 
@@ -254,6 +254,29 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
+
+  # ── Business dashboard: Streamlit, reading only the serving API ─────
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard.Dockerfile
+    image: smartgrid-dashboard:1.0
+    container_name: sg-dashboard
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./:/app:ro
+    ports:
+      - "8501:8501"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
 volumes:

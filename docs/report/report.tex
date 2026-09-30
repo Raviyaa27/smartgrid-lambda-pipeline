@@ -823,11 +823,51 @@ the 60-second freshness target.
 \end{tabular}
 \end{table}
 
-\subsection{Dashboards}
-\pending{Sections 9--10. Add the Streamlit business dashboard (live zone load and
-renewable mix labelled \textsc{provisional}; settled bills) and the Grafana operations
-dashboard, each with one screenshot and two or three sentences on what it shows. Add an
-Airflow grid-view screenshot showing scheduled, restated and gate-refused runs.}
+\subsection{The business dashboard}
+A Streamlit dashboard answers the business question for a non-technical reader. It reads
+\emph{only} the serving API, so it cannot disagree with the merge rule. Its five pages
+cover the current grid, zone history across days, one settled day, household bills with
+their restatement history, and every settlement run. Two design rules make the
+provisional/settled distinction impossible to miss:
+\begin{enumerate*}[label=(\roman*)]
+  \item source is shown by colour \emph{and} words, blue for \textsc{settled} and orange
+  for \textsc{provisional}. That pair was validated as colour-blind safe (worst CVD
+  $\Delta E$ 24.7 in light mode, 26.8 in dark, against a target of 8), and each source
+  keeps its colour when the other is absent;
+  \item load and solar share are always separate charts, never one chart with two
+  y-axes.
+\end{enumerate*}
+Every chart has a table view.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.93\linewidth]{figures/dashboard_grid_now.png}
+\caption{Grid now, at simulated 2026-01-02 11:59, during the live run. Each zone's
+latest complete window, 9\,s old in real time and labelled \textsc{provisional}. ZONE-B
+triggered the low-solar warning at 29\% against a 30\% floor, which applies only
+between 10:00 and 14:00: at night every zone is at 0\%, which is not news. The floor was
+calibrated on the simulation, where midday zone shares run from 25\% to 180\%.}
+\label{fig:dash-grid}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.93\linewidth]{figures/dashboard_zone_history.png}
+\caption{Zone history: the merge rule on one chart. Day 1 is settled (run 39, blue),
+recomputed by the batch layer with its late readings. Day 2 is today, provisional from
+the speed layer (orange). The day badges above the charts say which layer served each day.}
+\label{fig:dash-history}
+\end{figure}
+
+The household page makes restatement visible to a billing clerk. In the same run, a
+backdated +10\% \code{DOMESTIC_STD} revision was restated through Airflow. For household
+HH-00071 the page then listed both settlements of day~1: 825.67\,LKR under drop v1
+(run 39), and 907.24\,LKR under drop v2 (run 40), marked as the bill now shown, with the
+regulator's reason.
+
+\pending{Section 10. Add the Grafana operations dashboard (one screenshot, two or three
+sentences) and an Airflow grid-view screenshot showing scheduled, restated and
+gate-refused runs.}
 
 % ============================================================================
 \section{Limitations, trade-offs and production scale}

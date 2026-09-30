@@ -252,6 +252,27 @@ curl -s localhost:8000/api/v1/zones/live
 curl -s "localhost:8000/api/v1/households/HH-00042/bills?from=2026-01-01&to=2026-01-03"
 ```
 
+### The business dashboard
+
+A Streamlit dashboard at http://localhost:8501 answers the business question
+for a non-technical reader. It reads only the serving API, so it shows
+exactly what the merge rule decides, and it labels every figure: **blue /
+SETTLED** comes from the batch layer, **orange / PROVISIONAL** from the speed
+layer.
+
+| Page | Shows |
+|---|---|
+| Grid now (`/`) | Current load and solar share per zone, refreshed every 10 s; flags stale data, and zones below the solar-share floor between 10:00 and 14:00 |
+| Zone history (`/history`) | 15-minute load and solar share across days: settled days and today on one chart, each labelled |
+| Settlement (`/settlement`) | A settled day: totals, billing by tier, how far the real-time view was off per zone, the daily report |
+| Household bills (`/bills`) | A household's settled bills, why any day has none yet, and each bill's restatement history |
+| Settlement runs (`/runs`) | Every settlement, restatement and failure: the audit trail |
+
+Pages accept `?zone=ZONE-B` and `?household=HH-00042`, so a view can be shared
+as a link. The dashboard follows the browser's light or dark setting, and its
+charts use a colour-blind-safe palette with a table view under each chart.
+The solar-share floor and its hours are `RENEWABLE_ALERT_*` in `.env`.
+
 ### Task runner
 
 | Task | Windows | Linux / macOS |
@@ -274,6 +295,7 @@ curl -s "localhost:8000/api/v1/households/HH-00042/bills?from=2026-01-01&to=2026
 | Follow Airflow logs | `.\scripts\dev.ps1 airflow-logs` | `make airflow-logs` |
 | Settle / restate a day | `python scripts/settle.py --date D [--restate --reason R]` | same |
 | Follow API logs | `.\scripts\dev.ps1 api-logs` | `make api-logs` |
+| Follow dashboard logs | `.\scripts\dev.ps1 dashboard-logs` | `make dashboard-logs` |
 | New simulation (everything) | `.\scripts\dev.ps1 sim-reset` | `make sim-reset` |
 
 ### Consoles
@@ -285,6 +307,7 @@ curl -s "localhost:8000/api/v1/households/HH-00042/bills?from=2026-01-01&to=2026
 | Spark UI (speed layer) | http://localhost:4040 | — |
 | Airflow | http://localhost:8080 | — (no login; local demo only) |
 | Serving API docs | http://localhost:8000/docs | — |
+| Business dashboard | http://localhost:8501 | — |
 
 ## Repository layout
 
@@ -316,7 +339,7 @@ tests/               unit and integration tests
 | Speed layer | Complete — Spark 3.5 in Docker; reconciled to the message across a restart |
 | Batch settlement layer | Complete — Airflow 3.1 + Spark; quality gate, bills, reconciliation, daily report, restatement |
 | Serving API | Complete — FastAPI; merge rule, provisional/settled labels, bill history, metrics |
-| Dashboards | Not started |
+| Business dashboard | Complete — Streamlit over the API; provisional/settled labelling, bill history, audit trail |
 | Observability (Prometheus, Grafana, alerts) | Not started |
 
 ## Assumptions and simplifications

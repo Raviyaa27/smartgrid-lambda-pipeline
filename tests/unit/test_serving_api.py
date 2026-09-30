@@ -350,6 +350,14 @@ def test_bill_history_shows_the_original_and_the_restatement(client):
     assert body["revisions"][1]["reason"] == "Regulator revision"
 
 
+def test_households_are_listed_and_filterable_by_zone(client):
+    everyone = client.get("/api/v1/households").json()
+    assert len(everyone) == len(FLEET)
+    in_a = client.get("/api/v1/households?zone=ZONE-A").json()
+    assert in_a and {h["grid_zone"] for h in in_a} == {"ZONE-A"}
+    assert client.get("/api/v1/households?zone=ZONE-Z").status_code == 404
+
+
 # -- Reports ------------------------------------------------------------------------
 
 
