@@ -4,12 +4,11 @@
 %
 %  Build:  pdflatex report.tex  (run twice for cross-references)
 %     or:  latexmk -pdf report.tex
-%  Every figure is drawn in TikZ/pgfplots from measured values, except the
-%  report screenshot in figures/.
+%  Diagrams and charts are drawn in TikZ/pgfplots from measured values; the
+%  screenshots of the running system are in figures/.
 %
-%  Orange "To complete" boxes mark content that depends on components still
-%  being built (serving API, dashboards, Prometheus/Grafana alerting). Search
-%  for \pending before submission: none may remain.
+%  Before submission, fill in the cover details in "Cover details" below.
+%  Anything still unfilled prints on an orange background.
 % ============================================================================
 \documentclass[11pt,a4paper]{article}
 
@@ -32,8 +31,6 @@
 \usepackage{caption}
 \usepackage{fancyhdr}
 \usepackage{titlesec}
-\usepackage{tcolorbox}
-\usepackage{float}
 \usepackage[hyphens]{url}
 \usepackage[hidelinks]{hyperref}
 \usepackage[capitalise,noabbrev]{cleveref}
@@ -53,6 +50,13 @@
 \setlength{\parskip}{4.5pt plus 1pt}
 \setlist{itemsep=1.5pt,topsep=2pt,parsep=0pt,leftmargin=1.3em}
 \renewcommand{\arraystretch}{1.18}
+% Floats go at the top of text pages; a page of floats alone must be nearly full.
+\renewcommand{\topfraction}{0.85}
+\renewcommand{\bottomfraction}{0.6}
+\renewcommand{\textfraction}{0.12}
+\renewcommand{\floatpagefraction}{0.8}
+\setcounter{topnumber}{3}
+\setcounter{totalnumber}{4}
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\color{muted}EC8203 Mini Project -- Smart Grid Lambda Pipeline}
@@ -62,13 +66,17 @@
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
 \newcommand{\sq}{Q}
 \newcommand{\nm}{\tiny\ttfamily\bfseries}  % task names in diagrams
-% Content that depends on components still being built.
-\newcommand{\pending}[1]{%
-  \begin{tcolorbox}[colback=orange!7,colframe=orange!75!black,boxrule=0.6pt,arc=2pt,
-    left=5pt,right=5pt,top=3pt,bottom=3pt,fontupper=\small]
-  \textbf{To complete:} #1
-  \end{tcolorbox}}
 \newcommand{\fillin}[1]{\colorbox{orange!15}{\small #1}}
+
+% -- Cover details: replace each \fillin{...} with the value ----------------
+\newcommand{\nameRavindu}{Ravindu \fillin{full name}}
+\newcommand{\regRavindu}{\fillin{reg.\ no.}}
+\newcommand{\nameAmami}{Amami \fillin{full name}}
+\newcommand{\regAmami}{\fillin{reg.\ no.}}
+\newcommand{\nameOshani}{Oshani \fillin{full name}}
+\newcommand{\regOshani}{\fillin{reg.\ no.}}
+\newcommand{\submissiondate}{\fillin{submission date}}
+\newcommand{\videolink}{\fillin{link to the demo video}}
 
 \hypersetup{pdftitle={Smart Grid Energy Monitoring and Billing: A Lambda Architecture Pipeline},
   pdfsubject={EC8203 Applied Big Data Engineering -- Mini Project}}
@@ -80,34 +88,51 @@
 % ============================================================================
 \begin{titlepage}
   \thispagestyle{empty}
-  \vspace*{1.2cm}
-  {\color{muted}\large EC8203 Applied Big Data Engineering\\[2pt] Mini Project Report}\\[1.6cm]
+  \vspace*{0.3cm}
+  {\color{muted}\large EC8203 Applied Big Data Engineering\\[2pt] Mini Project Report}\\[1.0cm]
   {\color{accent}\rule{\linewidth}{1.2pt}}\\[0.5cm]
   {\Huge\bfseries\color{ink} Smart Grid Energy Monitoring\\[4pt] and Billing}\\[0.4cm]
   {\LARGE\color{accent} A Lambda Architecture Pipeline}\\[0.3cm]
   {\color{accent}\rule{\linewidth}{1.2pt}}\\[0.8cm]
   {\large Use Case 3 \,$\cdot$\, Kafka, Spark Structured Streaming, Airflow,\\[2pt]
-   Parquet on S3-compatible storage, PostgreSQL}\\[2.2cm]
+   Parquet on S3-compatible storage, PostgreSQL}\\[1.1cm]
 
   \begin{tabular}{@{}ll@{}}
     \toprule
     \textbf{Group member} & \textbf{Registration number} \\
     \midrule
-    Ravindu \fillin{full name} & \fillin{reg.\ no.} \\
-    Amami \fillin{full name}   & \fillin{reg.\ no.} \\
-    Oshani \fillin{full name}  & \fillin{reg.\ no.} \\
+    \nameRavindu & \regRavindu \\
+    \nameAmami   & \regAmami \\
+    \nameOshani  & \regOshani \\
     \bottomrule
-  \end{tabular}\\[1.6cm]
+  \end{tabular}\\[0.9cm]
 
   \begin{tabular}{@{}ll@{}}
     Repository & \url{https://github.com/Raviyaa27/smartgrid-lambda-pipeline} \\
+    Demo video & \videolink \\
     Simulated clock & 1 simulated day = 300 real seconds (288$\times$), from 2026-01-01 \\
-    Date & \fillin{submission date}
-  \end{tabular}
+    Date & \submissiondate
+  \end{tabular}\\[1.1cm]
+
+  {\small{\color{accent}\textbf{Summary.}}\enspace
+  A utility needs two things from the same smart-meter data: a live view of grid load
+  and solar contribution by zone, and household bills that are exact and reproducible.
+  We built a Lambda pipeline that serves each on its own terms. A Spark streaming layer
+  keeps the live view seconds behind the meters. An Airflow-orchestrated Spark batch
+  layer recomputes each day from an immutable Parquet archive and joins it with the
+  day's tariff drop to bill every household. A serving API decides, by an explicit rule,
+  which layer answers. On the running system the live view stayed within 1.3\,\% of the
+  settled figures, except in a zone whose meters went offline, where it was 36\,\% low
+  until settlement recovered the readings. A backdated tariff was restated with the
+  original bills kept, and a corrupt tariff file produced no bills. Alert rules, each
+  unit-tested, caught both the outage and the corrupt file live. One command builds,
+  runs and checks the whole system.\par}
   \vfill
   {\small\color{muted} All figures in this report were measured on the running system unless
-  stated otherwise. Domain quantities (dates, windows, lag) are in simulated time; machine
-  quantities (run times, latency) are in real time, and each figure says which.}
+  stated otherwise. They come from several fresh simulations run as the system grew; the
+  settlement run number identifies each. Domain quantities (dates, windows, lag) are in
+  simulated time; machine quantities (run times, latency) are in real time, and each figure
+  says which.}
 \end{titlepage}
 
 % ============================================================================
@@ -278,7 +303,6 @@ structurally, not by discipline:
   bat/.style={box, fill=batchc!12},
   sto/.style={box, fill=violet!7},
   srv/.style={box, fill=green!8},
-  wip/.style={dashed, draw=ink!60},
   flow/.style={->, thick, draw=ink!75},
   side/.style={font=\tiny, align=left, inner sep=1pt},
 ]
@@ -301,7 +325,7 @@ structurally, not by discipline:
 \node[font=\tiny, align=center, text width=2.3cm] at ($(pg.center)+(0,-1.6)$) {\textbf{\color{batchc}batch.*}\\settled bills and zones;\\\code{current_*} views};
 % -- serving (right column)
 \node[srv] (api) at (13.1,2.15) {\textbf{Serving API}\\FastAPI, merge rule:\\settled days from batch,\\today from speed};
-\node[srv] (dash) at (13.1,4.3) {\textbf{Dashboards}\\Streamlit: business\\Grafana: operations};
+\node[srv] (dash) at (13.1,4.3) {\textbf{Business dashboard}\\Streamlit, 5 pages;\\reads only the API};
 \node[srv] (report) at (13.1,0) {\textbf{Daily report}\\HTML per settlement\\\code{lake/reports/}};
 % -- flows
 \draw[flow] (meter) -- (kafka);
@@ -351,6 +375,76 @@ system of record. That is Parquet on MinIO, partitioned by \code{dt} and
 code. PostgreSQL holds only aggregates and bills, in three schemas that encode the
 merge rule in the storage layer itself.
 
+\textbf{One late reading, end to end.} \Cref{fig:late} follows a single reading
+through both paths. It is the case the architecture exists for: the speed layer must
+leave the reading out to stay fresh, and the bill must include it to be right.
+
+\begin{figure}[!htbp]
+\centering
+\begin{tikzpicture}[font=\scriptsize, >={Stealth[length=1.8mm]},
+  lane/.style={font=\scriptsize\bfseries, anchor=east, align=right, inner sep=1pt},
+  ev/.style={circle, fill=ink!85, inner sep=1.2pt},
+  msg/.style={->, thick, draw=ink!75, shorten >=1pt},
+  say/.style={font=\tiny, align=left, inner sep=1.5pt},
+  bar/.style={font=\tiny, minimum height=0.36cm, inner sep=0pt, anchor=west},
+  tick/.style={font=\tiny, anchor=north, inner sep=1.5pt}]
+\def\R{16.2}
+% -- lanes, top to bottom
+\foreach \y/\txt/\col in {0/Meter/ink, -0.62/Kafka/ink, -1.24/Real-time view/speedc,
+    -1.86/Master dataset/violet!70!black, -2.48/Batch layer/batchc, -3.1/Serving API/ink} {
+  \node[lane, text=\col] at (2.25,\y) {\txt};
+  \draw[ink!18] (2.4,\y) -- (\R,\y);
+}
+% -- day 1, 10:05: taken while the meter is offline
+\node[ev] at (2.8,0) {};
+\node[say, anchor=west] at (2.85,0) {taken at 10:05;\\meter offline};
+% -- day 1, 10:50: the backlog is uploaded; both speed-layer queries read it
+\node[ev] at (5.2,0) {};
+\node[say, anchor=west] at (5.25,0) {backlog uploaded at 10:50};
+\draw[msg] (5.2,0) -- (5.2,-0.62);
+\draw[ink!85, line width=2.4pt, line cap=round] (5.2,-0.62) -- (5.75,-0.62);
+\node[say, anchor=west] at (5.85,-0.62) {one message, read by both speed-layer queries};
+\draw[msg, draw=speedc] (5.2,-0.62) -- (5.2,-1.24);
+\node[text=speedc, font=\small\bfseries, inner sep=0pt] at (5.2,-1.24) {$\times$};
+\node[say, anchor=east, align=right] at (5.05,-1.24) {behind the watermark\\(10:20): left out};
+\draw[msg] (5.75,-0.62) -- (5.75,-1.86);
+\node[ev] at (5.75,-1.86) {};
+\node[say, anchor=west] at (5.85,-1.86) {archived under \code{dt=}day 1,\\the day it was taken};
+% -- the day ends; settlement after the 45-minute grace
+\draw[ink!45, dashed] (9.3,0.25) -- (9.3,-3.35);
+\draw[msg] (11.0,-1.86) -- (11.0,-2.48);
+\node[ev] at (11.0,-1.86) {};
+\node[say, anchor=west] at (11.1,-1.86) {the whole day, no watermark};
+\node[ev] at (11.0,-2.48) {};
+\node[say, anchor=west] at (11.1,-2.48) {deduplicated, billed;\\counted as recovered};
+\draw[msg] (13.9,-2.48) -- (13.9,-2.92);
+\node[ev] at (13.9,-2.48) {};
+% -- what the serving layer shows for day 1
+\node[bar, fill=speedc!80, text=white, minimum width=6.9cm] at (2.4,-3.1)
+  {\hspace{3pt}\textbf{day 1: PROVISIONAL} (speed layer), reading missing};
+\node[bar, fill=speedc!30, text=ink, minimum width=4.6cm] at (9.3,-3.1)
+  {\hspace{3pt}awaiting settlement (speed layer)};
+\node[bar, fill=batchc!85, text=white, minimum width=2.3cm] at (13.9,-3.1)
+  {\hspace{3pt}\textbf{SETTLED} (batch)};
+% -- simulated time
+\draw[ink!60] (2.4,-3.55) -- (7.9,-3.55);
+\draw[ink!60] (8.2,-3.55) -- (\R,-3.55);
+\draw[ink!60] (7.82,-3.66) -- (7.98,-3.44) (8.12,-3.66) -- (8.28,-3.44);
+\foreach \x/\t in {2.8/{day 1, 10:05}, 5.2/10:50, 9.3/24:00, 11.0/{day 2, after 00:45},
+    13.9/run committed} {
+  \draw[ink!60] (\x,-3.55) -- (\x,-3.62);
+  \node[tick] at (\x,-3.62) {\t};
+}
+\node[font=\tiny\itshape, text=muted, anchor=east] at (2.25,-3.55) {simulated time};
+\end{tikzpicture}
+\caption{The life of one late reading. Uploaded at 10:50, after the real-time view's
+30-minute watermark has passed its 10:05 timestamp, it never reaches the provisional
+figures. The archive writer has no watermark and files it under the day it was taken.
+Settlement reads that whole day, bills the reading and counts it as recovered, and day~1
+then switches from the speed layer to the batch layer.}
+\label{fig:late}
+\end{figure}
+
 % ============================================================================
 \section{Technology stack and justification}
 \label{sec:stack}
@@ -368,14 +462,14 @@ ability to recompute a day exactly} is the requirement most choices serve.
 \toprule
 \textbf{Layer} & \textbf{Choice} & \textbf{Why, for this use case} & \textbf{Rejected} \\
 \midrule
-Ingestion & Kafka 7.6 (KRaft), 6 partitions keyed by meter, 7-day retention & A replayable log. The speed layer restarts from its checkpointed offsets. Per-meter ordering where deduplication needs it. Retention sized to \emph{recovery}, not restatement: the configuration line that encodes the Lambda choice. & RabbitMQ (no replay); Kinesis (no local reproducibility) \\
+Ingestion & Kafka 3.6 (Confluent 7.6, KRaft), 6 partitions keyed by meter, 7-day retention & A replayable log. The speed layer restarts from its checkpointed offsets. Per-meter ordering where deduplication needs it. Retention sized to \emph{recovery}, not restatement: the configuration line that encodes the Lambda choice. & RabbitMQ (no replay); Kinesis (no local reproducibility) \\
 Stream processing & Spark 3.5 Structured Streaming & Native event-time windows and watermarks for late meter reads; exactly-once effects via checkpoints and idempotent sinks; \textbf{the same engine as the batch layer}, which contains Lambda's drift risk. & Storm (no event time, no batch reuse); Flink (outside the named stack) \\
 Batch processing & Spark 3.5 (batch), same image and jars & One artefact, two modes. Settlement re-validates with the same code the speed layer used. & A separate pandas job \\
 Orchestration & Airflow 3.1 & Sensors for the late daily file; per-task retries separating transient from fatal errors; the quality gate as a task that fails closed; run history as the settlement audit trail; restatement is re-triggering the DAG for a date. & cron (no dependencies, no history); Dagster (outside the stack) \\
 Master dataset & Parquet on MinIO (S3 API) & Columnar and compressed (8--10$\times$); partitioning by date makes ``recompute one day'' read exactly one partition; immutable input makes bills reproducible. & HDFS (a NameNode for no benefit); raw rows in PostgreSQL \\
 Serving store & PostgreSQL 16; schemas \code{speed}, \code{batch}, \code{ops} & Serving queries are relational and ad hoc (household $\bowtie$ tariff $\bowtie$ zone). Serving volume is aggregates, orders of magnitude below raw readings. & Cassandra (no ad hoc joins; query-first modelling) \\
 Serving \& dashboards & FastAPI; Streamlit (business); Grafana (operations) & One API applies the merge rule so no consumer can bypass it; separate business and operations views for separate audiences. & -- \\
-Observability & JSON logs, Prometheus, Grafana & Metrics per stage with a pull model; logs that machines can filter by run, batch or correlation id. & Unstructured logs \\
+Observability & JSON logs, Prometheus 3.5, Grafana 12.2 & Metrics per stage with a pull model; logs that machines can filter by run, batch or correlation id. & Unstructured logs \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -603,7 +697,7 @@ The response then lists 91 settled windows for day~1 and 67 provisional ones for
   \code{batch.current_*} views on every request.
 \end{itemize}
 
-It is tested at two levels. 32 unit tests cover the merge rule and the HTTP contract
+It is tested at two levels. 33 unit tests cover the merge rule and the HTTP contract
 against an in-memory store. 6 integration tests run every SQL query against the real
 schema.
 
@@ -618,7 +712,7 @@ wire together functions that are tested without Airflow. The suite has
 inside the Spark image. They include the validator parity fuzz test, energy-model
 regressions, integration tests against MinIO under a throw-away prefix, billing
 arithmetic checked to the cent, and the alert-rule tests. Nine architecture decision
-records (ADRs) document each major choice with its rejected alternatives. Eight of
+records (ADRs, in \code{docs/adr/}) document each major choice with its rejected alternatives. Eight of
 their amendments record what we got wrong at first and how running the system showed
 it.
 
@@ -747,18 +841,21 @@ Each layer was verified against the injected ground truth, on the running stack
 
 \begin{table}[!htbp]
 \centering\small
-\caption{Verification against ground truth.}
+\caption{Verification against ground truth, with the requirement each check evidences (\cref{sec:usecase}).}
 \label{tab:verify}
 \begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}X@{}}
 \toprule
 \textbf{Check} & \textbf{Result} \\
 \midrule
+Freshness (R1) & The real-time view trails the simulated clock by 6--10\,s real time, against a 60\,s target, and every figure is labelled \textsc{provisional}. \\
 Stream fault detection & 3{,}230 live messages: \textbf{all 101 injected faults} classified as designed; \textbf{0 false rejections}. \\
-Daily drop quality gate & 11 business dates covering every fault kind, a revision and a recovery republish: verdict matched ground truth on \textbf{11 of 11}. \\
+Daily drop quality gate (R5) & 11 business dates covering every fault kind, a revision and a recovery republish: verdict matched ground truth on \textbf{11 of 11}. \\
 Speed layer, no loss & 42{,}529 messages published = \textbf{42{,}529 processed}, across a mid-stream restart that resumed from its checkpoint (micro-batch 9 after 8). \\
 Speed layer, routing & 311 rejected = exactly the injected content faults; 311 dead-lettered; 42{,}218 archived; no double writes. \\
-Batch layer & Day 1 settled automatically: 28{,}245 archived readings, 269 retransmissions removed, 352 late readings recovered, 200 households billed, LKR 206{,}276.28. \\
-Fail closed & Day 2's drop was published truncated: the gate refused it on checksum and record count, and \textbf{no bill was written}. After the drop was republished, day 2 settled normally: 29{,}777 readings, 232 late, LKR 215{,}772.88. \\
+Batch layer (R2, R4) & Day 1 settled automatically: 28{,}245 archived readings, 269 retransmissions removed, 352 late readings recovered, 200 households billed, LKR 206{,}276.28. \\
+Fail closed (R5) & Day 2's drop was published truncated: the gate refused it on checksum and record count, and \textbf{no bill was written}. After the drop was republished, day 2 settled normally: 29{,}777 readings, 232 late, LKR 215{,}772.88. \\
+Restatement (R3) & Day 1 restated after a backdated tariff: only the revised tier changed, and the original run was kept beside the new one (\cref{tab:restate}). \\
+Alerting (R6) & Eight rules unit-tested with \code{promtool}; a zone outage and a refused drop each fired their alert live and resolved on recovery (\cref{sec:obs}). \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -774,8 +871,8 @@ view was.
 \includegraphics[width=0.84\linewidth]{figures/daily_report_restated.png}
 \caption{The daily report for 2026-01-01 after a restatement (run 36, drop v2). The
 highlighted note gives the change in total and its reason. ``Speed vs batch'' is the
-real-time view's measured error per zone. The report continues with the largest bills
-and data-quality counts.}
+real-time view's measured error per zone. The report continues with billing by tier
+(\cref{tab:restate}), the largest bills and data-quality counts.}
 \label{fig:report}
 \end{figure}
 
@@ -893,7 +990,7 @@ Every chart has a table view.
 
 \begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.93\linewidth]{figures/dashboard_grid_now.png}
+\includegraphics[width=0.85\linewidth]{figures/dashboard_grid_now.png}
 \caption{Grid now, at simulated 2026-01-02 11:59, during the live run. Each zone's
 latest complete window, 9\,s old in real time and labelled \textsc{provisional}. ZONE-B
 triggered the low-solar warning at 29\% against a 30\% floor, which applies only
@@ -904,20 +1001,17 @@ calibrated on the simulation, where midday zone shares run from 25\% to 180\%.}
 
 \begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.93\linewidth]{figures/dashboard_zone_history.png}
+\includegraphics[width=0.85\linewidth]{figures/dashboard_zone_history.png}
 \caption{Zone history: the merge rule on one chart. Day 1 is settled (run 39, blue),
 recomputed by the batch layer with its late readings. Day 2 is today, provisional from
 the speed layer (orange). The day badges above the charts say which layer served each day.}
 \label{fig:dash-history}
 \end{figure}
 
-The household page makes restatement visible to a billing clerk. In the same run, a
-backdated +10\% \code{DOMESTIC_STD} revision was restated through Airflow. For household
-HH-00071 the page then listed both settlements of day~1: 825.67\,LKR under drop v1
-(run 39), and 907.24\,LKR under drop v2 (run 40), marked as the bill now shown, with the
-regulator's reason.
-
-The operations counterpart, the Grafana dashboard, is shown in \cref{fig:grafana}.
+The household page makes restatement visible to a billing clerk. In that run a backdated
++10\% \code{DOMESTIC_STD} revision was restated, and household HH-00071's day~1 listed 825.67\,LKR
+under drop v1 (run 39) and 907.24\,LKR under drop v2 (run 40, the bill now shown), with
+the regulator's reason. The operations counterpart is the Grafana dashboard (\cref{fig:grafana}).
 
 % ============================================================================
 \section{Limitations, trade-offs and production scale}

@@ -27,6 +27,10 @@ The full argument, including why Kappa was rejected and the conditions under
 which that rejection stops being correct, is in
 **[ADR-0001](docs/adr/0001-lambda-over-kappa.md)**.
 
+The project report, **[docs/report/report.pdf](docs/report/report.pdf)**,
+presents the design, the measured results and the limitations in 15 pages.
+Its LaTeX source is `docs/report/report.tex` (`pdflatex report.tex`, run twice).
+
 ## Architecture
 
 ```
@@ -383,7 +387,7 @@ then run it to rewrite `infra/grafana/dashboards/smartgrid-operations.json`.
 
 ```
 docs/adr/            architecture decision records
-docs/report/         assessment report
+docs/report/         project report (report.pdf) and its LaTeX source
 infra/               service configuration (postgres init, prometheus, grafana)
 src/smartgrid/
   common/            config, logging, clock, domain, schemas, transformations, billing
@@ -403,7 +407,7 @@ tests/               unit and integration tests
 |---|---|
 | Infrastructure (Kafka, PostgreSQL, MinIO) | Complete |
 | Foundation package (`smartgrid.common`) | Complete |
-| Architecture decision records | Complete — 8 records |
+| Architecture decision records | Complete — 9 records, 8 amendments |
 | Streaming producer | Complete — physical model, 8 fault types, 100% measured detection |
 | Daily batch source | Complete — versioned drops, tariff as data, 8 fault types, quality gate at 100% |
 | Speed layer | Complete — Spark 3.5 in Docker; reconciled to the message across a restart |
@@ -412,6 +416,7 @@ tests/               unit and integration tests
 | Business dashboard | Complete — Streamlit over the API; provisional/settled labelling, bill history, audit trail |
 | Observability | Complete — Prometheus with 8 promtool-tested alert rules; Grafana operations dashboard |
 | Packaging | Complete — everything in Docker Compose, sources included; one-command demo that checks its own results |
+| Report | Complete — `docs/report/report.pdf`, 15 pages plus cover |
 
 ## Assumptions and simplifications
 
