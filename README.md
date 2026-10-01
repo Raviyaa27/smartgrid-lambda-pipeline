@@ -84,15 +84,18 @@ running system:
 
 1. readings flow end to end, every zone is live, and every component is scraped;
 2. a scheduled ZONE-C outage fires `ZoneSilent` for that zone alone, and it clears;
-3. day 1 is settled on schedule. Outside the outage, the real-time view was
-   within 2 % of the settled figures. In ZONE-C, settlement recovered the
-   backfilled readings the real-time view missed. Bills exist only for
-   settled days;
+3. day 1 is settled on schedule. The real-time view never over-reported, and
+   outside the outage it was typically within 2 % of the settled figures. In
+   ZONE-C, settlement recovered the backfilled readings the real-time view
+   missed. Bills exist only for settled days;
 4. a backdated tariff revision restates day 1, and only the revised tier changes;
 5. day 2's deliberately corrupt drop is refused, `DropRefused` fires, and
    republishing the drop recovers the day.
 
-It prints which UI to look at, and when, then ends with a PASS/FAIL table.
+It prints which UI to look at, and when, stamping each step with the real time
+since the simulation began, then ends with a PASS/FAIL table. The demo video
+is recorded from one run of it: [docs/demo-video.md](docs/demo-video.md) is
+the scene-by-scene script, with narration and a recording checklist.
 The stack is left running. The first run builds five images, taking 10–20
 minutes and about 10 GB of disk; the run itself takes about 16 minutes
 (`--quick` stops after day 1, in about 8). `.env` is created from
@@ -388,6 +391,7 @@ then run it to rewrite `infra/grafana/dashboards/smartgrid-operations.json`.
 ```
 docs/adr/            architecture decision records
 docs/report/         project report (report.pdf) and its LaTeX source
+docs/demo-video.md   demo video script and recording checklist
 infra/               service configuration (postgres init, prometheus, grafana)
 src/smartgrid/
   common/            config, logging, clock, domain, schemas, transformations, billing

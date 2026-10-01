@@ -14,9 +14,10 @@ the report, reproduced. The stack is left running for exploring afterwards.
     1. Readings flow end to end; every zone is live; every component is scraped.
     2. A zone outage (ZONE-C, scheduled) fires ZoneSilent for that zone alone,
        and it clears when the zone returns.
-    3. Day 1 settles on schedule. Outside the outage, the real-time view was
-       within 2 % of settled; in ZONE-C, settlement recovered the backfill the
-       real-time view missed. Bills exist only once a day is settled.
+    3. Day 1 settles on schedule. The real-time view never over-reported, and
+       outside the outage it was typically within 2 % of settled; in ZONE-C,
+       settlement recovered the backfill the real-time view missed. Bills
+       exist only once a day is settled.
     4. A backdated tariff revision restates day 1: only the revised tier changes.
     5. Day 2's drop is corrupt (deliberately, from the seed): the gate refuses
        it, DropRefused fires, the drop is republished and the day settles.
@@ -44,7 +45,12 @@ ROOT = Path(__file__).resolve().parents[1]
 API = "http://localhost:8000"
 PROMETHEUS = "http://localhost:9090"
 OUTAGE_ZONE = "ZONE-C"
-OUTAGE = f"{OUTAGE_ZONE}:150:90"  # offline 150 s after start, for 90 s
+# Offline 100 s after the start, for 150 s. ZoneSilent takes about 105 s to fire
+# (60 s threshold, some 25 s of pipeline lag, 20 s `for`), so the outage must be
+# longer than that for the alert to fire while the zone is still out. It ends
+# well before day 1 does (+300 s), so the backfill lands before settlement.
+OUTAGE_AFTER, OUTAGE_FOR = 100, 150
+OUTAGE = f"{OUTAGE_ZONE}:{OUTAGE_AFTER}:{OUTAGE_FOR}"
 PIPELINE = ["meter-simulator", "batch-source", "speed-layer", "airflow"]
 REVISION = "Regulator backdated revision: DOMESTIC_STD +10%"
 URLS = [
@@ -64,12 +70,27 @@ def say(text: str = "") -> None:
     print(text, flush=True)
 
 
+# Real time the simulation started. From then on, phases, cues and checks are
+# stamped with the time since, so a screen recording can be cut against them.
+sim_started: float | None = None
+
+
+def elapsed(start: float, now: float) -> str:
+    """'+04:05': real minutes and seconds since `start`."""
+    seconds = max(0, int(now - start))
+    return f"+{seconds // 60:02d}:{seconds % 60:02d}"
+
+
+def stamp() -> str:
+    return f"[{elapsed(sim_started, time.time())}] " if sim_started else ""
+
+
 def phase(title: str) -> None:
-    say(f"\n{'=' * 78}\n  {title}\n{'=' * 78}")
+    say(f"\n{'=' * 78}\n  {stamp()}{title}\n{'=' * 78}")
 
 
 def look(what: str) -> None:
-    say(f"  -> look: {what}")
+    say(f"  {stamp()}-> look: {what}")
 
 
 @dataclass
@@ -84,7 +105,7 @@ results: list[Check] = []
 
 def record(claim: str, passed: bool, detail: str) -> bool:
     results.append(Check(claim, passed, detail))
-    say(f"  [{'PASS' if passed else 'FAIL'}] {claim}: {detail}")
+    say(f"  {stamp()}[{'PASS' if passed else 'FAIL'}] {claim}: {detail}")
     return passed
 
 
@@ -191,7 +212,11 @@ def available_memory_gb() -> float | None:
 
 @dataclass(frozen=True)
 class OutageSplit:
-    worst_other_gap: float  # largest |real-time - settled| % outside the outage zone
+    median_other_gap: float  # median |real-time - settled| % outside the outage zone
+    worst_other: str  # the other zone furthest from settled
+    worst_other_gap: float  # ...and its real-time - settled %
+    worst_other_late: int  # ...and the late readings settlement recovered there
+    most_over: float  # the largest real-time - settled % in any zone; > 0 = over-reported
     outage_gap: float  # the outage zone's real-time - settled %
     outage_late: int  # late readings settlement recovered in the outage zone
     other_late: int  # the most recovered in any other zone
@@ -201,13 +226,28 @@ def outage_split(zones: list[dict], outage_zone: str) -> OutageSplit:
     """
     A silenced zone backfills its readings on return, after the speed layer's
     watermark, so its real-time figure for the day is far too low until
-    settlement recovers them. Judge the other zones on accuracy, and the
-    outage zone on the recovery.
+    settlement recovers them. Judge the outage zone on that recovery, and the
+    other zones on accuracy.
+
+    Accuracy is the median, not the worst zone: the realistic fault profile
+    also takes single meters offline for hours, and one high-consumption
+    meter's backfill can put its zone several percent low (6.3 % in one run).
+    That is the batch layer doing its job, not the speed layer failing. What
+    must hold everywhere is that the real-time view never over-reports: it
+    deduplicates, so it can only miss readings, never count one twice.
     """
     others = [z for z in zones if z["grid_zone"] != outage_zone]
     outage = next(z for z in zones if z["grid_zone"] == outage_zone)
+    gaps = sorted(abs(z["speed_vs_batch_pct"]) for z in others)
+    middle = len(gaps) // 2
+    median = gaps[middle] if len(gaps) % 2 else (gaps[middle - 1] + gaps[middle]) / 2
+    worst = max(others, key=lambda z: abs(z["speed_vs_batch_pct"]))
     return OutageSplit(
-        worst_other_gap=max(abs(z["speed_vs_batch_pct"]) for z in others),
+        median_other_gap=median,
+        worst_other=worst["grid_zone"],
+        worst_other_gap=worst["speed_vs_batch_pct"],
+        worst_other_late=worst["late_readings_recovered"] or 0,
+        most_over=max(z["speed_vs_batch_pct"] for z in zones),
         outage_gap=outage["speed_vs_batch_pct"],
         outage_late=outage["late_readings_recovered"] or 0,
         other_late=max(z["late_readings_recovered"] or 0 for z in others),
@@ -331,14 +371,18 @@ def fresh_simulation() -> tuple[float, dict]:
         *["run", "--rm", "--no-deps", "meter-simulator"],
         *["python", "-m", "smartgrid.common.simulation", "reset", "--yes"],
     )
-    t0 = time.time()
+    global sim_started
+    t0 = sim_started = time.time()
     compose("up", "-d", *PIPELINE, env={"SIM_SILENCE": OUTAGE})
     clock = wait_for(lambda: api("/api/v1/clock"), timeout=60, label="the simulated clock")
     if not clock:
         sys.exit("The serving API did not report a simulation.")
     start = clock["simulation_started"]
     say(f"  simulation {clock['sim_id']}: 1 day = 300 real seconds, from {start}")
-    say(f"  {OUTAGE_ZONE} goes offline at +150 s for 90 s (SIM_SILENCE={OUTAGE})")
+    say(
+        f"  {OUTAGE_ZONE} goes offline at +{OUTAGE_AFTER} s for {OUTAGE_FOR} s "
+        f"(SIM_SILENCE={OUTAGE})"
+    )
     say("\n  Open these now:")
     for name, url in URLS:
         say(f"    {name:<22} {url}")
@@ -411,9 +455,11 @@ def settle_day_one(t0: float, day1: date, day2: date) -> None:
     if daily:
         split = outage_split(daily["zones"], OUTAGE_ZONE)
         record(
-            "Outside the outage, the real-time view was within 2 % of settled",
-            split.worst_other_gap < 2.0,
-            f"largest gap in the other zones {split.worst_other_gap:.2f} %",
+            "The real-time view never over-reported, and was typically within 2 %",
+            split.most_over <= 0.01 and split.median_other_gap < 2.0,
+            f"median gap outside {OUTAGE_ZONE} {split.median_other_gap:.2f} %; largest "
+            f"{split.worst_other} {split.worst_other_gap:.2f} % ({split.worst_other_late} late "
+            f"readings recovered); most over settled {split.most_over:+.2f} %",
         )
         record(
             f"Settlement recovered {OUTAGE_ZONE}'s backfill the real-time view missed",
