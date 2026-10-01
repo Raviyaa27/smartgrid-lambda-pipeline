@@ -28,12 +28,13 @@ scrape_configs:
     static_configs:
       - targets: ["speed-layer:9103"]
 
-  # The two simulated sources run on the host (python -m ...); from inside
-  # Docker the host is host.docker.internal.
+  # The two simulated sources, as containers. (Run on the host instead, for
+  # development, they are not scraped: stop the containers first so the two
+  # copies do not both publish.)
   - job_name: meter-simulator
     static_configs:
-      - targets: ["host.docker.internal:9101"]
+      - targets: ["meter-simulator:9101"]
 
   - job_name: daily-batch-source
     static_configs:
-      - targets: ["host.docker.internal:9102"]
+      - targets: ["batch-source:9102"]

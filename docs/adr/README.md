@@ -19,7 +19,7 @@ architecture drove the build rather than being reverse-engineered from it.
 | [0006](0006-airflow-for-orchestration.md) | Airflow for batch orchestration | Accepted, amended |
 | [0007](0007-simulated-clock-and-time-compression.md) | Simulated clock at 288x compression | Accepted, amended |
 | [0008](0008-versioned-immutable-daily-drops.md) | Versioned, immutable, manifest-completed daily drops; tariff as data | Accepted |
-| [0009](0009-observability-prometheus-grafana.md) | Observability: Prometheus, tested alert rules, Grafana | Accepted |
+| [0009](0009-observability-prometheus-grafana.md) | Observability: Prometheus, tested alert rules, Grafana | Accepted, amended |
 
 ADR-0001 is the load-bearing record. Everything else follows from it.
 

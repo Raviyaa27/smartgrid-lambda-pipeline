@@ -132,7 +132,7 @@ separating them is the basis of every decision that follows (\cref{tab:q1q2}).
 approximately right. \sq2 is financial: a bill is regulated, disputable and
 must be reproducible years later.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{The business question decomposed. The two halves differ on every axis that matters for architecture.}
 \label{tab:q1q2}
@@ -195,7 +195,7 @@ for a utility of this kind. That scale is $10^6$ meters $\times$ 1 reading/minut
 $=1.44\times10^9$ events/day, about 288\,GB/day raw, and about 736\,TB over a
 7-year dispute and retention window.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{Lambda versus Kappa on the axes that decide this use case.}
 \label{tab:axes}
@@ -266,7 +266,7 @@ structurally, not by discipline:
 \label{sec:arch}
 % ============================================================================
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \begin{tikzpicture}[
   font=\scriptsize, >={Stealth[length=2.2mm]},
@@ -360,7 +360,7 @@ Each choice is justified against this use case's constraints rather than general
 popularity (\cref{tab:stack}), using the tools' documented guarantees~\cite{kafka,spark,airflow}. One theme runs through them: \emph{the batch layer's
 ability to recompute a day exactly} is the requirement most choices serve.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{Technology stack. Every component runs from one \code{docker compose up}; versions are pinned.}
 \label{tab:stack}
@@ -418,7 +418,7 @@ to be robust by feeding it the faults it claims to handle (\cref{tab:faults}). T
 stream carries the injected fault in an \code{injected_fault} Kafka header that the
 pipeline never reads. Detection can therefore be \emph{measured} against ground truth.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{Injected faults and the component that handles each.}
 \label{tab:faults}
@@ -470,7 +470,7 @@ in settlement (recorded as an ADR amendment).
 \subsection{Batch layer}
 \label{sec:batch}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \begin{tikzpicture}[font=\scriptsize, >={Stealth[length=2mm]},
   t/.style={draw=ink!70, rounded corners=2pt, fill=#1, align=center, minimum height=0.9cm,
@@ -554,7 +554,7 @@ the settlement itself. Serving nothing in that gap would blank yesterday every m
 Such a day is therefore served from the speed layer, labelled \emph{awaiting
 settlement}.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{Serving API endpoints: \code{GET} requests under \code{/api/v1}. Interactive documentation at \code{/docs}.}
 \label{tab:api}
@@ -612,14 +612,22 @@ schema.
 
 The code is one Python package (\code{smartgrid}) with modules for \code{common}
 (clock, schemas, shared validation, billing, storage), \code{producers},
-\code{streaming} and \code{batch}. The DAG files only wire together functions that are
-tested without Airflow. The suite has \textbf{343 unit and integration tests}, and
-\textbf{8 Spark tests} that run inside the Spark image. They include the validator
-parity fuzz test, energy-model regressions, integration tests against MinIO under a
-throw-away prefix, and billing arithmetic checked to the cent. Eight architecture
-decision records (ADRs) document each major choice with its rejected alternatives. Six
-of their amendments record what we got wrong at first and how running the system
-showed it.
+\code{streaming}, \code{batch}, \code{serving} and \code{dashboard}. The DAG files only
+wire together functions that are tested without Airflow. The suite has
+\textbf{382 unit and integration tests}, and \textbf{8 Spark tests} that run
+inside the Spark image. They include the validator parity fuzz test, energy-model
+regressions, integration tests against MinIO under a throw-away prefix, billing
+arithmetic checked to the cent, and the alert-rule tests. Nine architecture decision
+records (ADRs) document each major choice with its rejected alternatives. Eight of
+their amendments record what we got wrong at first and how running the system showed
+it.
+
+\textbf{Reproducible with one command.} Every component, including the simulated
+sources, runs from \code{docker compose up}; the host needs only Docker and Python.
+\code{make demo} (or \code{dev.ps1 demo}) builds the five images and starts a fresh
+simulation. It then walks through the outage, settlement, restatement and refused-drop
+scenarios, checks each claim of \cref{sec:results} against the running system, and
+ends with a PASS/FAIL table.
 
 % ============================================================================
 \section{Observability design}
@@ -630,7 +638,7 @@ The goal is that a failure is \emph{detected} by a signal rather than a person, 
 \emph{diagnosed} without attaching a debugger. \Cref{tab:obs} lists what is measured,
 how, and why.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{What is measured, how, and why.}
 \label{tab:obs}
@@ -663,7 +671,7 @@ six-zone alert storm when the whole speed layer is stale, because \code{ZoneSile
 applies only while the stream itself is fresh. Breaking one input on purpose made
 the suite fail, so the tests do test.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{Alert rules (\code{infra/prometheus/rules}), with the basis of each threshold.}
 \label{tab:alerts}
@@ -689,7 +697,7 @@ script, so a panel change is a reviewable diff. Alertmanager was left out
 deliberately: nobody is paged in a demo, and adding it later changes routing, not the
 rules (ADR-0009).
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.84\linewidth]{figures/grafana_operations.png}
 \caption{Grafana during the live run (top section). The tiles show status by colour
@@ -737,7 +745,7 @@ happened:
 Each layer was verified against the injected ground truth, on the running stack
 (\cref{tab:verify}).
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{Verification against ground truth.}
 \label{tab:verify}
@@ -761,7 +769,7 @@ the business question for the settled day: load and renewable contribution by zo
 and what each tier and household is billed. It also states how reliable the real-time
 view was.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.84\linewidth]{figures/daily_report_restated.png}
 \caption{The daily report for 2026-01-01 after a restatement (run 36, drop v2). The
@@ -771,7 +779,7 @@ and data-quality counts.}
 \label{fig:report}
 \end{figure}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \begin{tikzpicture}
 \begin{groupplot}[group style={group size=2 by 1, horizontal sep=2.1cm},
@@ -804,12 +812,17 @@ reconciliation counts exactly which readings the real-time view never saw: 352 t
 arrived after its watermark, all recovered by settlement. Both layers apply the same
 validator and the same window function, so the gap is attributable to timing, not to
 diverging logic. That is precisely why billing (\sq2) must come from the batch layer.
+An outage makes the point sharply. In the scripted demo, ZONE-C was taken offline for
+90 real seconds, and on return its meters uploaded the missed readings, all behind
+the watermark. The real-time figure for ZONE-C's day was therefore 36\,\% low.
+Settlement recovered 1{,}313 backfilled readings and corrected it, while the other
+zones stayed within 1.3\,\%.
 
 \subsection{Restatement}
 A regulator's backdated +10\% revision of the \code{DOMESTIC_STD} tariff for day 1 was
 published as drop v2, and the day was restated through Airflow (\cref{tab:restate}).
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{Day 1 bills by tier: original settlement (run 35) against the restatement (run 36).}
 \label{tab:restate}
@@ -841,7 +854,7 @@ Parquet files dominates the cost; it is discussed in \cref{sec:limits}. The real
 trails the simulated clock by about 30 simulated minutes (${\approx}6$\,s real), within
 the 60-second freshness target.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{Settling one simulated day (28{,}245 readings in 309 Parquet files). Real seconds.}
 \label{tab:timing}
@@ -878,7 +891,7 @@ provisional/settled distinction impossible to miss:
 \end{enumerate*}
 Every chart has a table view.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.93\linewidth]{figures/dashboard_grid_now.png}
 \caption{Grid now, at simulated 2026-01-02 11:59, during the live run. Each zone's
@@ -889,7 +902,7 @@ calibrated on the simulation, where midday zone shares run from 25\% to 180\%.}
 \label{fig:dash-grid}
 \end{figure}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.93\linewidth]{figures/dashboard_zone_history.png}
 \caption{Zone history: the merge rule on one chart. Day 1 is settled (run 39, blue),
@@ -968,7 +981,7 @@ The project was planned and reviewed jointly. Design decisions were agreed in gr
 discussion and recorded as ADRs, and each member reviewed the others' code before it
 was merged. Primary responsibilities were divided as follows.
 
-\begin{table}[H]
+\begin{table}[!htbp]
 \centering\small
 \caption{Division of work.}
 \label{tab:contrib}

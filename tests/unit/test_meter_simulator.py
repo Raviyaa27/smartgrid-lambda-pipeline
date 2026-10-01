@@ -15,7 +15,7 @@ from smartgrid.common.clock import SimulatedClock
 from smartgrid.common.domain import build_fleet
 from smartgrid.common.transformations import validate_record
 from smartgrid.producers.faults import FaultKind, FaultProfile
-from smartgrid.producers.meter_simulator import MeterSimulator, SilenceWindow
+from smartgrid.producers.meter_simulator import MeterSimulator, SilenceWindow, parse_silence_spec
 
 INTERVAL = 2.0
 FLEET = build_fleet(num_households=12, num_zones=3, seed=7)
@@ -197,3 +197,21 @@ def test_emitted_counts_label_every_message():
     sim = make_sim(FaultProfile("dup", rates={FaultKind.DUPLICATE: 1.0}))
     sim.tick(real_now=10.0)
     assert sim.emitted == {"none": len(FLEET), "duplicate": len(FLEET)}
+
+
+# -- Scheduled outages from configuration (SIM_SILENCE) ------------------------------
+
+
+def test_a_silence_spec_schedules_outages_relative_to_start():
+    windows = parse_silence_spec("ZONE-C:120:90, ZONE-A:10:0", now=1000.0)
+    assert windows == [
+        SilenceWindow(zone="ZONE-C", start_real=1120.0, end_real=1210.0),
+        SilenceWindow(zone="ZONE-A", start_real=1010.0, end_real=None),  # 0 = until stopped
+    ]
+    assert parse_silence_spec("", now=1000.0) == []
+
+
+@pytest.mark.parametrize("spec", ["ZONE-C", "ZONE-C:120", "ZONE-C:soon:90"])
+def test_a_malformed_silence_spec_is_refused_with_its_entry(spec):
+    with pytest.raises(ValueError, match="ZONE:after_s:for_s"):
+        parse_silence_spec(spec, now=0.0)

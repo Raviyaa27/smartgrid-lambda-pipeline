@@ -133,3 +133,14 @@ alert fires.
   collector into its own exporter with cached results.
 - Log volume or retention requirements grow: add a log store and move
   diagnostic queries there.
+
+## Amendments
+
+### Amendment 1 — 2026-10-01: the sources are scraped as containers
+
+The simulated sources now run as the `meter-simulator` and `batch-source`
+containers, so `docker compose up` alone runs the whole pipeline.
+Prometheus scrapes them by service name, so the negative consequence above
+no longer applies: no `host.docker.internal`, and no host firewall in the
+path. A source run on the host for debugging is not scraped. The task
+runner stops its container first, so the two copies never both publish.

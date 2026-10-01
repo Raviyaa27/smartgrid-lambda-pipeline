@@ -64,24 +64,56 @@ day it is; all domain time derives from `SimulatedClock`, which is what makes
 the batch layer reproducible and replayable. Configured via `SIM_DAY_SECONDS`
 and `SIM_START_DATE`. See [ADR-0007](docs/adr/0007-simulated-clock-and-time-compression.md).
 
-## Quick start
+## Quick start: one command
 
-Requires Docker Desktop and Python 3.12. The full stack uses about 6 GB of
-memory while a day is being settled. With less free, settlement slows from
-about a minute and a half to several minutes, and Docker Desktop itself can
-fail. Close memory-heavy applications before a demo, and turn off Docker
-Desktop's automatic update downloads while recording.
+Requires **Docker** (Desktop on Windows and macOS) and **Python 3.11+**.
+Nothing else is installed on the host: every pipeline component, including
+the simulated sources, runs in a container.
 
 ```bash
-cp .env.example .env
-docker compose up -d
+python scripts/demo.py          # or: .\scripts\dev.ps1 demo   /   make demo
 ```
 
-Wait for the health checks, then verify the infrastructure:
+The demo builds and starts the whole stack, begins a fresh simulation, and
+walks through what the system does, checking each claim against the
+running system:
 
-```bash
-python scripts/smoke_test.py
-```
+1. readings flow end to end, every zone is live, and every component is scraped;
+2. a scheduled ZONE-C outage fires `ZoneSilent` for that zone alone, and it clears;
+3. day 1 is settled on schedule. Outside the outage, the real-time view was
+   within 2 % of the settled figures. In ZONE-C, settlement recovered the
+   backfilled readings the real-time view missed. Bills exist only for
+   settled days;
+4. a backdated tariff revision restates day 1, and only the revised tier changes;
+5. day 2's deliberately corrupt drop is refused, `DropRefused` fires, and
+   republishing the drop recovers the day.
+
+It prints which UI to look at, and when, then ends with a PASS/FAIL table.
+The stack is left running. The first run builds five images, taking 10–20
+minutes and about 10 GB of disk; the run itself takes about 16 minutes
+(`--quick` stops after day 1, in about 8). `.env` is created from
+`.env.example` if it is missing.
+
+| Open | URL |
+|---|---|
+| Business dashboard | http://localhost:8501 |
+| Grafana (operations) | http://localhost:3000 |
+| Airflow | http://localhost:8080 |
+| Serving API docs | http://localhost:8000/docs |
+
+**Resources.** The stack needs about 6 GB of memory while a day is being
+settled. With less free, settlement slows from about a minute and a half to
+several minutes, and Docker Desktop itself can fail. Close memory-heavy
+applications first, and turn off Docker Desktop's automatic update
+downloads while recording. Kafka UI is not started by default, to save
+memory: `docker compose --profile tools up -d kafka-ui`.
+
+**Without the demo:** `docker compose up -d --build` starts everything,
+sources included, and the pipeline runs on its own. `python
+scripts/smoke_test.py` then checks every service is provisioned, and
+`.\scripts\dev.ps1 sim-reset` begins a fresh simulation.
+
+### For development
 
 Set up the Python environment and run the test suite:
 
@@ -97,14 +129,15 @@ See the foundation modules working end to end, with no infrastructure needed:
 python scripts/section2_demo.py
 ```
 
-### Run the streaming source
+### The streaming source
 
-Start the simulated smart meters. Every process shares one simulated clock,
-anchored in PostgreSQL; `clock-reset` restarts simulated time from
-`SIM_START_DATE`.
+The simulated smart meters run as the `meter-simulator` container. Every
+process shares one simulated clock, anchored in PostgreSQL. To run the
+simulator on the host instead (for debugging), `.\scripts\dev.ps1 produce`
+stops the container first, so two copies never both publish:
 
 ```bash
-python -m smartgrid.common.clock_store reset
+docker compose stop meter-simulator
 python -m smartgrid.producers.meter_simulator
 ```
 
@@ -117,10 +150,14 @@ python scripts/inspect_stream.py --seconds 30
 
 Useful simulator options: `--faults none|realistic|chaos`, and
 `--silence-zone ZONE-C --silence-after 60 --silence-for 90` to take a zone
-offline (the lever for demonstrating the no-data alert). Prometheus metrics
-are served on port 9101.
+offline (the lever for demonstrating the no-data alert). The container takes
+the same outage from `SIM_SILENCE=ZONE-C:60:90`. Prometheus metrics are
+served on port 9101.
 
-### Run the daily batch source
+### The daily batch source
+
+It runs as the `batch-source` container; on the host, it is
+`.\scripts\dev.ps1 drop`.
 
 Publishes one reference drop per simulated day -- the day's tariff schedule,
 each household's tier and subsidy, and the weather forecast -- to
@@ -309,34 +346,31 @@ then run it to rewrite `infra/grafana/dashboards/smartgrid-operations.json`.
 
 | Task | Windows | Linux / macOS |
 |---|---|---|
-| Start stack | `.\scripts\dev.ps1 up` | `make up` |
-| Stop stack | `.\scripts\dev.ps1 down` | `make down` |
-| Wipe volumes | `.\scripts\dev.ps1 reset` | `make reset` |
-| Verify | `.\scripts\dev.ps1 verify` | `make verify` |
+| **Demo: build, run, check every claim** | `.\scripts\dev.ps1 demo` | `make demo` |
+| ...up to day 1 only, no rebuild | `.\scripts\dev.ps1 demo-quick` | `make demo-quick` |
+| Build and start everything | `.\scripts\dev.ps1 up` | `make up` |
+| Stop (data kept) / wipe volumes | `.\scripts\dev.ps1 down` / `reset` | `make down` / `make reset` |
+| Smoke-test every service | `.\scripts\dev.ps1 verify` | `make verify` |
+| Start Kafka UI (opt-in) | `.\scripts\dev.ps1 tools` | `make tools` |
+| New simulation (everything) | `.\scripts\dev.ps1 sim-reset` | `make sim-reset` |
+| Show the simulated clock | `.\scripts\dev.ps1 clock` | `make clock` |
+| Run a source on the host instead | `.\scripts\dev.ps1 produce` / `chaos` / `drop` | `make produce` / `chaos` / `drop` |
+| Settle / restate a day | `python scripts/settle.py --date D [--restate --reason R]` | same |
 | Run tests | `.\scripts\dev.ps1 test` | `make test` |
-| Show / reset simulated clock | `.\scripts\dev.ps1 clock` / `clock-reset` | `make clock` / `make clock-reset` |
-| Run meter simulator | `.\scripts\dev.ps1 produce` | `make produce` |
-| ...with 10x faults | `.\scripts\dev.ps1 chaos` | `make chaos` |
+| Spark tests (in the image) | `.\scripts\dev.ps1 spark-test` | `make spark-test` |
+| Test the alert rules (promtool) | `.\scripts\dev.ps1 alerts-test` | `make alerts-test` |
 | Measure fault detection | `.\scripts\dev.ps1 inspect` | `make inspect` |
-| Run daily batch source | `.\scripts\dev.ps1 drop` | `make drop` |
 | Gate every daily drop | `.\scripts\dev.ps1 drops` | `make drops` |
 | Reconcile the speed layer | `.\scripts\dev.ps1 speed` | `make speed` |
-| Follow speed-layer logs | `.\scripts\dev.ps1 speed-logs` | `make speed-logs` |
-| Spark tests (in the image) | `.\scripts\dev.ps1 spark-test` | `make spark-test` |
 | Settlement runs, bills, speed vs batch | `.\scripts\dev.ps1 settlement` | `make settlement` |
-| Follow Airflow logs | `.\scripts\dev.ps1 airflow-logs` | `make airflow-logs` |
-| Settle / restate a day | `python scripts/settle.py --date D [--restate --reason R]` | same |
-| Follow API logs | `.\scripts\dev.ps1 api-logs` | `make api-logs` |
-| Follow dashboard logs | `.\scripts\dev.ps1 dashboard-logs` | `make dashboard-logs` |
-| Test the alert rules (promtool) | `.\scripts\dev.ps1 alerts-test` | `make alerts-test` |
 | Firing alerts, from the terminal | `.\scripts\dev.ps1 alerts` | `make alerts` |
-| New simulation (everything) | `.\scripts\dev.ps1 sim-reset` | `make sim-reset` |
+| Follow logs | `.\scripts\dev.ps1 source-logs` / `speed-logs` / `airflow-logs` / `api-logs` / `dashboard-logs` | `make <same>` |
 
 ### Consoles
 
 | Service | URL | Credentials |
 |---|---|---|
-| Kafka UI | http://localhost:8085 | — |
+| Kafka UI (opt-in: `dev.ps1 tools`) | http://localhost:8085 | — |
 | MinIO Console | http://localhost:9001 | `minioadmin` / `minioadmin123` |
 | Spark UI (speed layer) | http://localhost:4040 | — |
 | Airflow | http://localhost:8080 | — (no login; local demo only) |
@@ -377,6 +411,7 @@ tests/               unit and integration tests
 | Serving API | Complete — FastAPI; merge rule, provisional/settled labels, bill history, metrics |
 | Business dashboard | Complete — Streamlit over the API; provisional/settled labelling, bill history, audit trail |
 | Observability | Complete — Prometheus with 8 promtool-tested alert rules; Grafana operations dashboard |
+| Packaging | Complete — everything in Docker Compose, sources included; one-command demo that checks its own results |
 
 ## Assumptions and simplifications
 

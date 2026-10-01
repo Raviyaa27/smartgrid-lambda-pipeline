@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     sim_emit_interval_seconds: float = 2.0
     sim_seed: int = 20260101
     sim_fault_profile: str = "realistic"
+    # Scheduled zone outages for the meter simulator, "ZONE:after_s:for_s" with
+    # commas between several (real seconds from start). Empty = none. Lets a
+    # containerised simulator be started with an outage, e.g. for the demo.
+    sim_silence: str = ""
 
     # -- Spark (speed and batch layers) ------------------------------------
     spark_master: str = "local[4]"

@@ -75,10 +75,13 @@ services:
         echo "[kafka-init] topics now present:"
         kafka-topics --bootstrap-server kafka:29092 --list
 
-  # ── Kafka UI (developer observability) ───────────────────────────────
-  # Port 8085 to leave 8080 free for Airflow.
+  # ── Kafka UI (developer tool, opt-in) ────────────────────────────────
+  # Not started by default, to keep the stack's memory down; start it with
+  # `docker compose --profile tools up -d kafka-ui`. Port 8085 leaves 8080
+  # free for Airflow.
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
+    profiles: ["tools"]
     container_name: sg-kafka-ui
     depends_on:
       kafka:
@@ -154,6 +157,46 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+
+  # ── Simulated sources: smart meters and the daily batch feed ─────────
+  # One image (docker/sources.Dockerfile), two services. Both join the
+  # shared simulated clock in ops.sim_clock, so they agree on the date.
+  # SIM_SILENCE schedules a zone outage, e.g. "ZONE-C:120:90" (the demo
+  # uses it to make ZoneSilent fire).
+  meter-simulator:
+    build:
+      context: .
+      dockerfile: docker/sources.Dockerfile
+    image: smartgrid-sources:1.0
+    container_name: sg-meter-simulator
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "smartgrid.producers.meter_simulator"]
+    environment:
+      SIM_SILENCE: ${SIM_SILENCE:-}
+    volumes:
+      - ./:/app:ro
+    restart: unless-stopped
+
+  batch-source:
+    image: smartgrid-sources:1.0
+    container_name: sg-batch-source
+    depends_on:
+      meter-simulator:
+        condition: service_started   # same image; built once, by meter-simulator
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "smartgrid.producers.daily_batch_source", "follow"]
+    volumes:
+      - ./:/app:ro
+    restart: unless-stopped
 
   # ── Speed layer: Spark Structured Streaming (ADR-0002) ───────────────
   # Our own image (docker/spark.Dockerfile): Python 3.11 + PySpark 3.5 with
@@ -292,10 +335,6 @@ services:
     volumes:
       - ./infra/prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus
-    # The two sources run on the host; this makes host.docker.internal
-    # resolve on Linux too (Docker Desktop provides it already).
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "9090:9090"
     healthcheck:

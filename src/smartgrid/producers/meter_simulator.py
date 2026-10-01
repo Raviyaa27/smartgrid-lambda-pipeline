@@ -577,6 +577,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def parse_silence_spec(spec: str, now: float, *, backfill: bool = True) -> list[SilenceWindow]:
+    """
+    "ZONE-C:120:90" -> ZONE-C offline from now+120 s for 90 s (0 = until stopped).
+    Several are separated by commas. Raises ValueError on a malformed entry.
+    """
+    windows = []
+    for entry in filter(None, (part.strip() for part in spec.split(","))):
+        try:
+            zone, after, duration = entry.split(":")
+            after_s, for_s = float(after), float(duration)
+        except ValueError as exc:
+            raise ValueError(f"bad silence {entry!r}: expected ZONE:after_s:for_s") from exc
+        windows.append(
+            SilenceWindow(
+                zone=zone,
+                start_real=now + after_s,
+                end_real=now + after_s + for_s if for_s > 0 else None,
+                backfill=backfill,
+            )
+        )
+    return windows
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     settings = get_settings()
@@ -594,6 +617,8 @@ def main(argv: list[str] | None = None) -> None:
         )
         for zone in args.silence_zone
     ]
+    if not silences and settings.sim_silence:  # flags win; SIM_SILENCE otherwise
+        silences = parse_silence_spec(settings.sim_silence, now, backfill=not args.no_backfill)
 
     run(
         settings,
